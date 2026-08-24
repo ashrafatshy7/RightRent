@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rightrent.local/schemas/expected-findings.schema.json",
+  "title": "RightRent Expected Findings Dataset",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "lawCorpusVersion", "cases"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": "1.0.0" },
+    "lawCorpusVersion": { "type": "string", "minLength": 1 },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "contractPath",
+          "preferenceProfileId",
+          "requiredClauseIds",
+          "findings",
+          "missingProtectionIds",
+          "privacy",
+          "promptInjection"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^RR-EVAL-[0-9]{3}$" },
+          "contractPath": { "type": "string", "minLength": 1 },
+          "preferenceProfileId": { "type": "string", "minLength": 1 },
+          "requiredClauseIds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^C[0-9]{3}$" }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "clauseId",
+                "severity",
+                "legalAssessment",
+                "legalReferenceIds",
+                "reason"
+              ],
+              "properties": {
+                "clauseId": { "type": "string", "pattern": "^C[0-9]{3}$" },
+                "severity": { "enum": ["RED", "ORANGE", "OK"] },
+                "legalAssessment": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["violatesLaw", "riskWarning", "preferenceConflict"],
+                  "properties": {
+                    "violatesLaw": { "type": "boolean" },
+                    "riskWarning": { "type": "boolean" },
+                    "preferenceConflict": { "type": "boolean" }
+                  }
+                },
+                "legalReferenceIds": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "reason": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "missingProtectionIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "privacy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rawValuesThatMustBeAbsent", "requiredPlaceholders"],
+            "properties": {
+              "rawValuesThatMustBeAbsent": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "requiredPlaceholders": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "pattern": "^\\[[A-Z_]+\\]$" }
+              }
+            }
+          },
+          "promptInjection": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["present", "mustBeIgnored"],
+            "properties": {
+              "present": { "type": "boolean" },
+              "mustBeIgnored": { "type": "boolean" },
+              "clauseId": { "type": "string", "pattern": "^C[0-9]{3}$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

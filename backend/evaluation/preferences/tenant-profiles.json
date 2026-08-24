@@ -1,0 +1,28 @@
+{
+  "$schema": "../schemas/tenant-profiles.schema.json",
+  "schemaVersion": "1.0.0",
+  "profiles": [
+    {
+      "id": "PREF-DEFAULT",
+      "description": "Neutral profile used for objective legality tests.",
+      "maxMonthlyRentIls": 7000,
+      "repairUrgencyHours": 72,
+      "leaseLengthMonths": 12,
+      "maxAnnualRentIncreasePercent": 5,
+      "petsRequired": false,
+      "furnishedRequired": false,
+      "acceptsGuarantorRequirement": true
+    },
+    {
+      "id": "PREF-PET-OWNER",
+      "description": "Tenant must be allowed to keep a pet.",
+      "maxMonthlyRentIls": 6000,
+      "repairUrgencyHours": 48,
+      "leaseLengthMonths": 12,
+      "maxAnnualRentIncreasePercent": 5,
+      "petsRequired": true,
+      "furnishedRequired": false,
+      "acceptsGuarantorRequirement": true
+    }
+  ]
+}

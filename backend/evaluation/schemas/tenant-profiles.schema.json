@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rightrent.local/schemas/tenant-profiles.schema.json",
+  "title": "RightRent Evaluation Tenant Profiles",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "profiles"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": "1.0.0" },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "description",
+          "maxMonthlyRentIls",
+          "repairUrgencyHours",
+          "leaseLengthMonths",
+          "maxAnnualRentIncreasePercent",
+          "petsRequired",
+          "furnishedRequired",
+          "acceptsGuarantorRequirement"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^PREF-[A-Z-]+$" },
+          "description": { "type": "string", "minLength": 1 },
+          "maxMonthlyRentIls": { "type": "number", "minimum": 0 },
+          "repairUrgencyHours": { "enum": [24, 48, 72, 168] },
+          "leaseLengthMonths": { "type": "integer", "minimum": 1 },
+          "maxAnnualRentIncreasePercent": { "type": "number", "minimum": 0 },
+          "petsRequired": { "type": "boolean" },
+          "furnishedRequired": { "type": "boolean" },
+          "acceptsGuarantorRequirement": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

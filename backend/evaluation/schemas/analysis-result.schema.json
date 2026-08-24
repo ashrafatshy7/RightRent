@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rightrent.local/schemas/analysis-result.schema.json",
+  "title": "RightRent Analysis Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractId",
+    "status",
+    "summary",
+    "findings",
+    "missingProtections",
+    "suggestedAdditions",
+    "privacy",
+    "timingMs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "analysisId": { "type": "string", "minLength": 1 },
+    "contractId": { "type": "string", "minLength": 1 },
+    "status": { "const": "COMPLETED" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["critical", "warnings", "compliant"],
+      "properties": {
+        "critical": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "compliant": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "missingProtections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/protection" }
+    },
+    "suggestedAdditions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/protection" }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redactionCompleted", "redactedEntityCount"],
+      "properties": {
+        "redactionCompleted": { "type": "boolean" },
+        "redactedEntityCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "markedPdf": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["storageKey"],
+          "properties": {
+            "storageKey": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "timingMs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total"],
+      "properties": {
+        "extraction": { "type": "integer", "minimum": 0 },
+        "redaction": { "type": "integer", "minimum": 0 },
+        "retrievalAndAnalysis": { "type": "integer", "minimum": 0 },
+        "pdfGeneration": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0, "maximum": 90000 }
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clauseId",
+        "severity",
+        "title",
+        "explanation",
+        "legalAssessment",
+        "legalReferences",
+        "locations"
+      ],
+      "properties": {
+        "clauseId": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["RED", "ORANGE", "OK"] },
+        "title": { "type": "string", "minLength": 1 },
+        "explanation": { "type": "string", "minLength": 1 },
+        "legalAssessment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["violatesLaw", "riskWarning", "preferenceConflict"],
+          "properties": {
+            "violatesLaw": { "type": "boolean" },
+            "riskWarning": { "type": "boolean" },
+            "preferenceConflict": { "type": "boolean" }
+          }
+        },
+        "legalReferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["lawReferenceId", "section"],
+            "properties": {
+              "lawReferenceId": { "type": "string", "minLength": 1 },
+              "section": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["page", "bbox"],
+            "properties": {
+              "page": { "type": "integer", "minimum": 1 },
+              "bbox": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "number" },
+                  { "type": "number" },
+                  { "type": "number", "exclusiveMinimum": 0 },
+                  { "type": "number", "exclusiveMinimum": 0 }
+                ],
+                "minItems": 4,
+                "maxItems": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protectionId", "status", "explanation"],
+      "properties": {
+        "protectionId": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["MISSING", "PARTIAL"] },
+        "explanation": { "type": "string", "minLength": 1 },
+        "suggestedText": { "type": "string" }
+      }
+    }
+  }
+}
