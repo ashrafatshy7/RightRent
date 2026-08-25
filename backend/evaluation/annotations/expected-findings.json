@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/expected-findings.schema.json",
   "schemaVersion": "1.0.0",
-  "lawCorpusVersion": "engineering-seed-2026-08-24",
+  "lawCorpusVersion": "engineering-reference-ids-2026-08-25",
   "cases": [
     {
       "id": "RR-EVAL-001",

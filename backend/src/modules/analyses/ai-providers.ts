@@ -36,7 +36,8 @@ async function checkedJson(response: Response, service: string) {
   return response.json() as Promise<unknown>;
 }
 
-export async function embedText(text: string): Promise<number[]> {
+export async function embedTexts(texts: string[]): Promise<number[][]> {
+  if (!texts.length) return [];
   if (!env.openAiApiKey) {
     throw new HttpError(503, "EMBEDDING_PROVIDER_NOT_CONFIGURED", "OPENAI_API_KEY is not configured.");
   }
@@ -46,15 +47,21 @@ export async function embedText(text: string): Promise<number[]> {
       authorization: `Bearer ${env.openAiApiKey}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ model: env.openAiEmbeddingModel, input: text }),
+    body: JSON.stringify({ model: env.openAiEmbeddingModel, input: texts }),
     signal: AbortSignal.timeout(30_000),
   });
   const result = await checkedJson(response, "OpenAI embeddings") as {
-    data?: Array<{ embedding?: number[] }>;
+    data?: Array<{ index?: number; embedding?: number[] }>;
   };
-  const embedding = result.data?.[0]?.embedding;
-  if (!embedding?.length) throw new HttpError(502, "INVALID_EMBEDDING_RESPONSE", "OpenAI returned no embedding.");
-  return embedding;
+  const ordered = [...(result.data ?? [])].sort((left, right) => (left.index ?? 0) - (right.index ?? 0));
+  if (ordered.length !== texts.length || ordered.some((item) => !item.embedding?.length)) {
+    throw new HttpError(502, "INVALID_EMBEDDING_RESPONSE", "OpenAI returned an incomplete embedding batch.");
+  }
+  return ordered.map((item) => item.embedding!);
+}
+
+export async function embedText(text: string): Promise<number[]> {
+  return (await embedTexts([text]))[0]!;
 }
 
 export async function analyzeWithClaude(

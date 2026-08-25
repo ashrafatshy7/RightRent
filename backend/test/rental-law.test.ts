@@ -1,69 +1,69 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  assertSupportedKnessetVersion,
-  buildRentalLawSections,
+  createOfficialFingerprint,
   type KnessetLawBinding,
-} from "../src/modules/law/rental-law.service.js";
-import { HttpError } from "../src/shared/http/http-error.js";
+} from "../src/modules/law/knesset-law.service.js";
+import { MONITORED_LAW_SOURCES } from "../src/modules/law/law-source.catalog.js";
+import {
+  buildLawChunks,
+  parseWikisourceLaw,
+} from "../src/modules/law/wikisource-law.service.js";
 
-const law = {
-  IsraelLawID: 2_000_596,
-  Name: "חוק השכירות והשאילה, התשל\"א-1971",
-  PublicationDate: "1971-08-05T00:00:00",
-  LatestPublicationDate: "2026-03-31T14:19:00",
-  LawValidityDesc: "תקף",
-};
+const html = `
+  <div id="law-content">
+    <div class="law-number">19.</div><div class="law-desc">סיום השכירות</div>
+    <div class="law-number2">(א)</div><div class="law-content2">נוסח תקף.</div>
+    <div class="law-number2">(ב)</div><div class="law-content2"><span class="law-note">(בוטל).</span></div>
+    <div class="law-number">25י.</div><div class="law-desc">ערובה <span class="law-note">[תיקון: תשפ״ו]</span></div>
+    <div class="law-number2">(א)</div><div class="law-content2">בסעיף זה –</div>
+    <div class="law-content2 law-indent">”נותן ערבות אחר“ – <span class="law-note">(החל מיום 30.9.2026):</span> נוסח עתידי;</div>
+    <div class="law-content3 law-indent">הגדרה עתידית;</div>
+    <div class="law-content2 law-indent">”ערובה“ – הנוסח התקף.</div>
+    <div class="law-number2">(ב)</div><div class="law-content2">ערבות בנקאית, <span class="law-note">(החל מיום 30.9.2026: ערבות מנותן ערבות אחר)</span> או מזומן.</div>
+    <div class="law-number">33.</div><div class="law-content1"><span class="law-note">הנוסח שולב בחוק אחר.</span></div>
+  </div>`;
 
-const bindings: KnessetLawBinding[] = [
-  { LawBindingID: 45_966, LawID: 148_733, IsraelLawID: 2_000_596, BindingType: 6_012 },
-  { LawBindingID: 56_263, LawID: 2_006_776, IsraelLawID: 2_000_596, BindingType: 6_013 },
-  { LawBindingID: 66_078, LawID: 2_199_304, IsraelLawID: 2_000_596, BindingType: 6_013 },
-  { LawBindingID: 67_580, LawID: 1_046_680, IsraelLawID: 2_000_596, BindingType: 6_013 },
-];
+test("the monitored source allowlist contains all thirteen selected laws", () => {
+  assert.equal(MONITORED_LAW_SOURCES.length, 13);
+  assert.equal(new Set(MONITORED_LAW_SOURCES.map((source) => source.israelLawId)).size, 13);
+  assert.ok(MONITORED_LAW_SOURCES.some((source) => source.israelLawId === 2_000_596));
+  assert.ok(MONITORED_LAW_SOURCES.some((source) => source.israelLawId === 2_000_633));
+});
 
-test("current rental law contains the complete supported Knesset consolidation", () => {
-  const sections = buildRentalLawSections("2026-08-25");
+test("Wikisource parsing keeps only provisions effective on the requested date", () => {
+  const sections = parseWikisourceLaw(html, "2026-08-25");
+  assert.deepEqual(sections.map((section) => section.number), ["19", "25י"]);
   const serialized = JSON.stringify(sections);
-
-  assert.equal(sections.filter((section) => /^\d+[א-ת]{0,2}$/u.test(section.number)).length, 51);
-  assert.equal(sections.filter((section) => section.number.startsWith("תוספת ")).length, 2);
-  assert.equal(sections.some((section) => section.number === "33"), false);
-  assert.deepEqual(
-    sections.find((section) => section.number === "19")?.children.map((child) => child.number),
-    ["(א)"],
-  );
-  assert.match(serialized, /ועדת הפנים והגנת הסביבה/u);
   assert.equal(serialized.includes("נותן ערבות אחר"), false);
-  assert.match(serialized, /ערבות בנקאית או מזומן/u);
+  assert.equal(serialized.includes("הגדרה עתידית"), false);
 });
 
-test("the 2026 Knesset amendment activates only on its effective date", () => {
-  const future = JSON.stringify(buildRentalLawSections("2026-09-30"));
-  const current = JSON.stringify(buildRentalLawSections("2026-08-25"));
-
-  assert.match(future, /נותן ערבות אחר/u);
-  assert.match(future, /ערבות בנקאית, ערבות מנותן ערבות אחר או מזומן/u);
-  assert.equal(current.includes("נותן ערבות אחר"), false);
+test("a future effective provision produces different embedding input", () => {
+  const current = buildLawChunks(2_000_596, parseWikisourceLaw(html, "2026-08-25"));
+  const future = buildLawChunks(2_000_596, parseWikisourceLaw(html, "2026-09-30"));
+  assert.notEqual(
+    current.find((chunk) => chunk.section === "25י")?.contentHash,
+    future.find((chunk) => chunk.section === "25י")?.contentHash,
+  );
+  assert.match(future.find((chunk) => chunk.section === "25י")?.text ?? "", /נותן ערבות אחר/u);
 });
 
-test("known Knesset bindings are accepted", () => {
-  assert.doesNotThrow(() => assertSupportedKnessetVersion(law, bindings));
-});
-
-test("an unknown Knesset amendment fails closed instead of serving stale law", () => {
+test("a new Knesset binding changes the official fingerprint", () => {
+  const law = {
+    IsraelLawID: 2_000_596,
+    Name: "חוק השכירות והשאילה, התשל\"א-1971",
+    PublicationDate: "1971-08-05T00:00:00",
+    LatestPublicationDate: "2026-03-31T14:19:00",
+    LawValidityDesc: "תקף",
+  };
+  const bindings: KnessetLawBinding[] = [
+    { LawBindingID: 45_966, LawID: 148_733, IsraelLawID: 2_000_596, BindingType: 6_012 },
+    { LawBindingID: 67_580, LawID: 1_046_680, IsraelLawID: 2_000_596, BindingType: 6_013 },
+  ];
   const changed = [
     ...bindings,
     { LawBindingID: 99_999, LawID: 9_999_999, IsraelLawID: 2_000_596, BindingType: 6_013 },
   ];
-
-  assert.throws(
-    () => assertSupportedKnessetVersion(
-      { ...law, LatestPublicationDate: "2027-01-01T00:00:00" },
-      changed,
-    ),
-    (error) => error instanceof HttpError
-      && error.status === 503
-      && error.code === "RENTAL_LAW_REVIEW_REQUIRED",
-  );
+  assert.notEqual(createOfficialFingerprint(law, bindings), createOfficialFingerprint(law, changed));
 });

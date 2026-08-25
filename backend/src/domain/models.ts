@@ -120,22 +120,89 @@ export type NegotiationRecord = {
 
 export type LawChunk = {
   id: string;
+  israelLawId: number;
+  lawName: string;
   section: string | null;
-  topic: string;
-  kind: "statutory_rule" | "recommended_contract_protection";
+  kind: "statutory_rule";
   text: string;
   sourceUrl: string;
   contentHash: string;
-  updatedAt: string;
-  embedding?: number[];
+  revisionId: number;
 };
+
+export type LawEmbeddingStatus = "CANDIDATE" | "ACTIVE" | "RETIRED";
+
+export type LawEmbeddingRecord = {
+  id: string;
+  referenceId: string;
+  israelLawId: number;
+  lawName: string;
+  section: string | null;
+  sourceOrdinal: number;
+  sourceUrl: string;
+  wikisourceTitle: string;
+  revisionId: number;
+  revisionTimestamp: string;
+  sourceAsOf: string;
+  officialFingerprint: string;
+  latestOfficialPublicationDate: string;
+  contentHash: string;
+  status: LawEmbeddingStatus;
+  createdAt: string;
+  embedding: number[];
+};
+
+export type LawSourceStatus =
+  | "ACTIVE"
+  | "AWAITING_VERIFICATION"
+  | "OFFICIAL_UPDATE_PENDING"
+  | "WIKISOURCE_CHANGED"
+  | "FAILED";
+
+export type LawSourceState = {
+  israelLawId: number;
+  lawName: string;
+  knessetUrl: string;
+  wikisourceTitle: string;
+  wikisourceUrl: string;
+  status: LawSourceStatus;
+  latestOfficialPublicationDate: string;
+  observedOfficialFingerprint: string;
+  observedBindingIds: number[];
+  observedAmendingLawIds: number[];
+  observedRevisionId: number;
+  observedRevisionTimestamp: string;
+  observedContentHash: string;
+  activeOfficialFingerprint: string | null;
+  activeRevisionId: number | null;
+  activeSourceAsOf: string | null;
+  activeContentHash: string | null;
+  candidateOfficialFingerprint: string | null;
+  candidateRevisionId: number | null;
+  candidateSourceAsOf: string | null;
+  candidateContentHash: string | null;
+  checkedAt: string;
+  verifiedAt: string | null;
+  verifiedBy: string | null;
+  verificationReference: string | null;
+  error: string | null;
+};
+
+export type LawSyncStatus =
+  | "UNCHANGED"
+  | "CANDIDATE_STAGED"
+  | "OFFICIAL_UPDATE_PENDING"
+  | "WIKISOURCE_CHANGED"
+  | "FAILED";
 
 export type LawSyncRecord = {
   id: string;
-  sourceUrl: string;
-  status: "COMPLETED" | "FAILED";
+  israelLawId: number;
+  status: LawSyncStatus;
   sectionCount: number;
-  contentHash: string;
-  syncedAt: string;
-  error?: string;
+  officialFingerprint: string;
+  wikisourceRevisionId: number | null;
+  contentHash: string | null;
+  checkedAt: string;
+  error: string | null;
 };

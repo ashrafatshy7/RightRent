@@ -6,7 +6,6 @@ import type {
   AnalysisRecord,
   ContractClause,
   Finding,
-  LawChunk,
   TenantPreferences,
 } from "../../domain/models.js";
 import { getStore } from "../../shared/data/store.js";
@@ -15,7 +14,7 @@ import { analyzeWithClaude, embedText, type ProviderVerdict } from "./ai-provide
 import { redactClauses } from "./anonymization.service.js";
 import { classifyClause } from "./classification.js";
 import { deterministicVerdict } from "./deterministic-analysis.service.js";
-import { activeLawCorpus } from "./law-corpus.service.js";
+import { retrieveLawCorpus } from "./law-corpus.service.js";
 import { createMarkedPdf } from "./marked-pdf.service.js";
 import { detectMissingProtections } from "./protection-checklist.service.js";
 
@@ -35,24 +34,37 @@ async function providerVerdict(
   clause: ContractClause,
   fullText: string,
   preferences: TenantPreferences,
-  corpus: LawChunk[],
 ) {
   if (env.analysisProvider !== "anthropic") {
-    return deterministicVerdict(clause, fullText, preferences);
+    const verdict = deterministicVerdict(clause, fullText, preferences);
+    const knownSections: Record<string, string> = {
+      "IL-RLL-25Y-SECURITY-CAP": "25י",
+      "IL-RLL-25Z-REPAIRS": "25ז",
+    };
+    return {
+      verdict,
+      references: verdict.legalReferenceIds.flatMap((id) => {
+        const section = knownSections[id];
+        return section ? [{ id, section }] : [];
+      }),
+    };
   }
-  const store = await getStore();
   const embedding = await embedText(clause.text);
-  const stored = await store.getLawChunks();
-  const lawSections = stored.some((item) => item.embedding?.length)
-    ? await store.searchLawChunks(embedding, 5)
-    : corpus.slice(0, 5);
-  return analyzeWithClaude(clause, lawSections, preferences);
+  const lawSections = await retrieveLawCorpus(embedding, 5);
+  return {
+    verdict: await analyzeWithClaude(clause, lawSections, preferences),
+    references: lawSections.map(({ id, section }) => ({ id, section })),
+  };
 }
 
-function toFinding(clause: ContractClause, verdict: ProviderVerdict, corpus: LawChunk[]): Finding {
+function toFinding(
+  clause: ContractClause,
+  verdict: ProviderVerdict,
+  context: Array<{ id: string; section: string | null }>,
+): Finding {
   const references = verdict.legalReferenceIds
-    .map((id) => corpus.find((item) => item.id === id))
-    .filter((item): item is LawChunk => Boolean(item))
+    .map((id) => context.find((item) => item.id === id))
+    .filter((item): item is { id: string; section: string | null } => Boolean(item))
     .map((item) => ({ lawReferenceId: item.id, section: item.section }));
 
   if (verdict.legalAssessment.violatesLaw && references.length === 0) {
@@ -95,14 +107,13 @@ export async function analyzeContract(
   const redactionStarted = performance.now();
   const redaction = redactClauses(contract.clauses);
   const redactionMs = Math.round(performance.now() - redactionStarted);
-  const corpus = await activeLawCorpus();
   const fullText = redaction.clauses.map((clause) => clause.text).join("\n");
 
   const analysisStarted = performance.now();
   const verdicts = await mapWithConcurrency(redaction.clauses, 3, (clause) =>
-    providerVerdict(clause, fullText, preferences, corpus));
+    providerVerdict(clause, fullText, preferences));
   const findings = redaction.clauses.map((clause, index) =>
-    toFinding(clause, verdicts[index]!, corpus));
+    toFinding(clause, verdicts[index]!.verdict, verdicts[index]!.references));
   const missingProtections = detectMissingProtections(redaction.clauses);
   const analysisMs = Math.round(performance.now() - analysisStarted);
 

@@ -3,7 +3,8 @@ import { env } from "../../config/env.js";
 import type {
   AnalysisRecord,
   ContractRecord,
-  LawChunk,
+  LawEmbeddingRecord,
+  LawSourceState,
   LawSyncRecord,
   NegotiationRecord,
   TenantPreferences,
@@ -27,10 +28,21 @@ export interface DataStore {
   deleteAnalysis(id: string): Promise<boolean>;
   getNegotiation(analysisId: string): Promise<NegotiationRecord | null>;
   upsertNegotiation(negotiation: NegotiationRecord): Promise<void>;
-  getLawChunks(): Promise<LawChunk[]>;
-  searchLawChunks(embedding: number[], topK: number): Promise<LawChunk[]>;
-  saveLawSync(sync: LawSyncRecord): Promise<void>;
-  replaceLawChunks(chunks: LawChunk[], sync: LawSyncRecord): Promise<void>;
+  getLawSourceState(israelLawId: number): Promise<LawSourceState | null>;
+  listLawSourceStates(): Promise<LawSourceState[]>;
+  searchLawEmbeddings(embedding: number[], topK: number): Promise<LawEmbeddingRecord[]>;
+  recordLawCheck(state: LawSourceState, sync: LawSyncRecord): Promise<void>;
+  stageLawVersion(
+    embeddings: LawEmbeddingRecord[],
+    state: LawSourceState,
+    sync: LawSyncRecord,
+  ): Promise<void>;
+  activateLawVersion(
+    israelLawId: number,
+    revisionId: number,
+    verifiedBy: string,
+    verificationReference: string,
+  ): Promise<LawSourceState | null>;
 }
 
 export class MemoryDataStore implements DataStore {
@@ -38,7 +50,9 @@ export class MemoryDataStore implements DataStore {
   private readonly contracts = new Map<string, ContractRecord>();
   private readonly analyses = new Map<string, AnalysisRecord>();
   private readonly negotiations = new Map<string, NegotiationRecord>();
-  private lawChunks: LawChunk[] = [];
+  private lawEmbeddings: LawEmbeddingRecord[] = [];
+  private readonly lawSourceStates = new Map<number, LawSourceState>();
+  private readonly lawSyncs: LawSyncRecord[] = [];
 
   async close() {}
 
@@ -118,29 +132,87 @@ export class MemoryDataStore implements DataStore {
     this.negotiations.set(negotiation.analysisId, structuredClone(negotiation));
   }
 
-  async getLawChunks() {
-    return structuredClone(this.lawChunks);
+  async getLawSourceState(israelLawId: number) {
+    return structuredClone(this.lawSourceStates.get(israelLawId) ?? null);
   }
 
-  async searchLawChunks(embedding: number[], topK: number) {
+  async listLawSourceStates() {
+    return structuredClone([...this.lawSourceStates.values()]);
+  }
+
+  async searchLawEmbeddings(embedding: number[], topK: number) {
     const magnitude = (values: number[]) => Math.sqrt(values.reduce((sum, value) => sum + value ** 2, 0));
     const queryMagnitude = magnitude(embedding);
-    return this.lawChunks
-      .filter((chunk) => chunk.embedding?.length === embedding.length)
-      .map((chunk) => ({
-        chunk,
-        score: chunk.embedding!.reduce((sum, value, index) => sum + value * embedding[index]!, 0) /
-          (magnitude(chunk.embedding!) * queryMagnitude || 1),
+    return this.lawEmbeddings
+      .filter((item) => item.status === "ACTIVE" && item.embedding.length === embedding.length)
+      .map((item) => ({
+        item,
+        score: item.embedding.reduce((sum, value, index) => sum + value * embedding[index]!, 0) /
+          (magnitude(item.embedding) * queryMagnitude || 1),
       }))
       .sort((left, right) => right.score - left.score)
       .slice(0, topK)
-      .map(({ chunk }) => structuredClone(chunk));
+      .map(({ item }) => structuredClone(item));
   }
 
-  async saveLawSync(_sync: LawSyncRecord) {}
+  async recordLawCheck(state: LawSourceState, sync: LawSyncRecord) {
+    this.lawSourceStates.set(state.israelLawId, structuredClone(state));
+    this.lawSyncs.push(structuredClone(sync));
+  }
 
-  async replaceLawChunks(chunks: LawChunk[], _sync: LawSyncRecord) {
-    this.lawChunks = structuredClone(chunks);
+  async stageLawVersion(
+    embeddings: LawEmbeddingRecord[],
+    state: LawSourceState,
+    sync: LawSyncRecord,
+  ) {
+    this.lawEmbeddings = this.lawEmbeddings.filter(
+      (item) => item.israelLawId !== state.israelLawId || item.status !== "CANDIDATE",
+    );
+    this.lawEmbeddings.push(...structuredClone(embeddings));
+    await this.recordLawCheck(state, sync);
+  }
+
+  async activateLawVersion(
+    israelLawId: number,
+    revisionId: number,
+    verifiedBy: string,
+    verificationReference: string,
+  ) {
+    const state = this.lawSourceStates.get(israelLawId);
+    const candidates = this.lawEmbeddings.filter(
+      (item) => item.israelLawId === israelLawId
+        && item.revisionId === revisionId
+        && item.status === "CANDIDATE",
+    );
+    if (state?.status !== "AWAITING_VERIFICATION"
+      || state.candidateRevisionId !== revisionId
+      || !candidates.length) return null;
+    this.lawEmbeddings = this.lawEmbeddings.map<LawEmbeddingRecord>((item) => {
+      if (item.israelLawId !== israelLawId) return item;
+      if (item.revisionId === revisionId && item.status === "CANDIDATE") {
+        return { ...item, status: "ACTIVE" };
+      }
+      return item.status === "ACTIVE" ? { ...item, status: "RETIRED" } : item;
+    });
+    const verifiedAt = new Date().toISOString();
+    const active: LawSourceState = {
+      ...state,
+      status: "ACTIVE",
+      activeOfficialFingerprint: state.candidateOfficialFingerprint,
+      activeRevisionId: state.candidateRevisionId,
+      activeSourceAsOf: state.candidateSourceAsOf,
+      activeContentHash: state.candidateContentHash,
+      candidateOfficialFingerprint: null,
+      candidateRevisionId: null,
+      candidateSourceAsOf: null,
+      candidateContentHash: null,
+      verifiedAt,
+      verifiedBy,
+      verificationReference,
+      error: null,
+    };
+    this.lawSourceStates.set(israelLawId, active);
+    return structuredClone(active);
   }
 }
 
@@ -173,7 +245,15 @@ class MongoDataStore implements DataStore {
         { analysisId: 1 },
         { unique: true },
       ),
-      this.collection<LawChunk>("law_chunks").createIndex({ id: 1 }, { unique: true }),
+      this.collection<LawEmbeddingRecord>("law_embeddings").createIndex({ id: 1 }, { unique: true }),
+      this.collection<LawEmbeddingRecord>("law_embeddings").createIndex(
+        { israelLawId: 1, status: 1, revisionId: 1 },
+      ),
+      this.collection<LawSourceState>("law_source_states").createIndex(
+        { israelLawId: 1 },
+        { unique: true },
+      ),
+      this.collection<LawSyncRecord>("law_syncs").createIndex({ checkedAt: -1 }),
     ]);
   }
 
@@ -234,12 +314,18 @@ class MongoDataStore implements DataStore {
       { upsert: true },
     );
   }
-  async getLawChunks() {
-    return this.collection<LawChunk>("law_chunks").find().toArray();
+  async getLawSourceState(israelLawId: number) {
+    return this.collection<LawSourceState>("law_source_states").findOne({ israelLawId });
   }
-  async searchLawChunks(embedding: number[], topK: number) {
-    return this.collection<LawChunk>("law_chunks")
-      .aggregate<LawChunk>([
+  async listLawSourceStates() {
+    return this.collection<LawSourceState>("law_source_states")
+      .find()
+      .sort({ israelLawId: 1 })
+      .toArray();
+  }
+  async searchLawEmbeddings(embedding: number[], topK: number) {
+    return this.collection<LawEmbeddingRecord>("law_embeddings")
+      .aggregate<LawEmbeddingRecord>([
         {
           $vectorSearch: {
             index: env.mongodbVectorIndex,
@@ -247,25 +333,104 @@ class MongoDataStore implements DataStore {
             queryVector: embedding,
             numCandidates: Math.max(topK * 20, 100),
             limit: topK,
+            filter: { status: "ACTIVE" },
           },
         },
         { $project: { _id: 0 } },
       ])
       .toArray();
   }
-  async saveLawSync(sync: LawSyncRecord) {
-    await this.collection<LawSyncRecord>("law_syncs").insertOne(sync);
+  async recordLawCheck(state: LawSourceState, sync: LawSyncRecord) {
+    await Promise.all([
+      this.collection<LawSourceState>("law_source_states").replaceOne(
+        { israelLawId: state.israelLawId },
+        state,
+        { upsert: true },
+      ),
+      this.collection<LawSyncRecord>("law_syncs").insertOne(sync),
+    ]);
   }
-  async replaceLawChunks(chunks: LawChunk[], sync: LawSyncRecord) {
+  async stageLawVersion(
+    embeddings: LawEmbeddingRecord[],
+    state: LawSourceState,
+    sync: LawSyncRecord,
+  ) {
     const session = this.client.startSession();
     try {
       await session.withTransaction(async () => {
-        await this.collection<LawChunk>("law_chunks").deleteMany({}, { session });
-        if (chunks.length) {
-          await this.collection<LawChunk>("law_chunks").insertMany(chunks, { session });
+        await this.collection<LawEmbeddingRecord>("law_embeddings").deleteMany(
+          { israelLawId: state.israelLawId, status: "CANDIDATE" },
+          { session },
+        );
+        if (embeddings.length) {
+          await this.collection<LawEmbeddingRecord>("law_embeddings").insertMany(
+            embeddings,
+            { session },
+          );
         }
+        await this.collection<LawSourceState>("law_source_states").replaceOne(
+          { israelLawId: state.israelLawId },
+          state,
+          { upsert: true, session },
+        );
         await this.collection<LawSyncRecord>("law_syncs").insertOne(sync, { session });
       });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async activateLawVersion(
+    israelLawId: number,
+    revisionId: number,
+    verifiedBy: string,
+    verificationReference: string,
+  ) {
+    const session = this.client.startSession();
+    try {
+      let active: LawSourceState | null = null;
+      await session.withTransaction(async () => {
+        const state = await this.collection<LawSourceState>("law_source_states").findOne(
+          { israelLawId, candidateRevisionId: revisionId, status: "AWAITING_VERIFICATION" },
+          { session },
+        );
+        const candidateCount = await this.collection<LawEmbeddingRecord>("law_embeddings")
+          .countDocuments({ israelLawId, revisionId, status: "CANDIDATE" }, { session });
+        if (!state || !candidateCount) return;
+
+        await this.collection<LawEmbeddingRecord>("law_embeddings").updateMany(
+          { israelLawId, status: "ACTIVE" },
+          { $set: { status: "RETIRED" } },
+          { session },
+        );
+        await this.collection<LawEmbeddingRecord>("law_embeddings").updateMany(
+          { israelLawId, revisionId, status: "CANDIDATE" },
+          { $set: { status: "ACTIVE" } },
+          { session },
+        );
+        active = {
+          ...state,
+          status: "ACTIVE",
+          activeOfficialFingerprint: state.candidateOfficialFingerprint,
+          activeRevisionId: state.candidateRevisionId,
+          activeSourceAsOf: state.candidateSourceAsOf,
+          activeContentHash: state.candidateContentHash,
+          candidateOfficialFingerprint: null,
+          candidateRevisionId: null,
+          candidateSourceAsOf: null,
+          candidateContentHash: null,
+          verifiedAt: new Date().toISOString(),
+          verifiedBy,
+          verificationReference,
+          error: null,
+        };
+        await this.collection<LawSourceState>("law_source_states").replaceOne(
+          { israelLawId },
+          active,
+          { session },
+        );
+      });
+      return active;
     } finally {
       await session.endSession();
     }

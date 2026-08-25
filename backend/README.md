@@ -5,15 +5,16 @@ Project Book: tenant accounts and preferences, secure PDF upload, text/coordinat
 local PII redaction, RAG-assisted legal analysis, deterministic severity classification,
 marked PDFs, history, a persisted negotiation state machine, and law-corpus synchronization.
 
-RightRent is a decision-support tool and does not provide legal advice. The engineering seed
-corpus under `evaluation/` is not authoritative statutory text. A production deployment must
-synchronize from a verified legal source and obtain legal review.
+RightRent is a decision-support tool and does not provide legal advice. Runtime statutory text is
+not committed to the backend and is not stored in MongoDB. A production deployment must review
+every candidate consolidation against the official publication before activating its embeddings.
 
 ## Requirements and setup
 
-- Node.js 20 or newer
+- Node.js 20.18.1 or newer
 - MongoDB Atlas for production; local development can use the in-memory data store
-- OpenAI and Anthropic credentials when `ANALYSIS_PROVIDER=anthropic`
+- OpenAI credentials for law synchronization and vector retrieval
+- Anthropic credentials when `ANALYSIS_PROVIDER=anthropic`
 
 ```bash
 cp .env.example .env
@@ -45,8 +46,8 @@ npm run check
   Monetary values remain because legal caps and budget preferences depend on them.
 - Contract text is always presented to Claude as untrusted data, so embedded prompt instructions
   are never treated as system instructions.
-- The law-sync endpoint uses a separate internal token. Its source URL comes only from server
-  configuration, which avoids a request-controlled SSRF target.
+- The law-sync endpoints use a separate internal token. Sources come from a fixed allowlist of
+  Knesset identifiers and matching Wikisource titles, so requests cannot choose an upstream URL.
 - Helmet, an origin allowlist, JSON body limits, HTTPS enforcement in production, and request rate
   limiting protect the HTTP boundary. State changes use Authorization headers rather than cookies,
   so they do not rely on ambient browser credentials and are resistant to CSRF.
@@ -60,9 +61,6 @@ shared store at the infrastructure layer.
 Public:
 
 - `GET /api/health`
-- `GET /api/laws/rental/current` — the currently effective consolidated Rental and Lending Law;
-  only official Knesset OData and publications are used. The service verifies the known law bindings
-  on every request and fails closed when the Knesset publishes an amendment that still requires review
 - `POST /api/auth/register` — `{ "email": string, "password": string }`
 - `POST /api/auth/login` — `{ "email": string, "password": string }`
 
@@ -86,22 +84,47 @@ The backend prepares text but never contacts a landlord or sends a WhatsApp mess
 Internal maintenance:
 
 - `POST /internal/law/sync` with `X-Internal-Token`
+- `GET /internal/law/status` with `X-Internal-Token`
+- `POST /internal/law/:israelLawId/approve` with `X-Internal-Token` and
+  `{ "revisionId": number, "verifiedBy": string, "verificationReference": string }`
 
-The configured law source may return a JSON `sections` array or HTML/plain text. Each validated
-section is normalized, hashed, embedded with OpenAI, and atomically replaces the active
-`law_chunks` corpus in MongoDB. Configure an Atlas Vector Search index named by
-`MONGODB_VECTOR_INDEX` over the `embedding` field using cosine similarity.
+The server starts an immediate source check and repeats it every hour. For each monitored law it
+builds an official fingerprint from `KNS_IsraelLaw` and the sorted `KNS_LawBinding` rows, then
+compares that fingerprint with the current rendered Wikisource revision. A Knesset change with no
+matching consolidated-text change remains `OFFICIAL_UPDATE_PENDING`. A new Wikisource page
+revision without a Knesset change is marked `WIKISOURCE_CHANGED`. When the official fingerprint
+and effective rendered text change together, OpenAI embeddings are staged as
+`AWAITING_VERIFICATION`. A same-revision content change caused by reaching a marked effective date
+is staged for the same review. Candidate vectors become searchable only after the internal approval
+endpoint records the reviewer and official verification reference. OData supplies change metadata,
+not the consolidated section text or a reliable effective-date interpretation.
+
+MongoDB stores `law_embeddings`, `law_source_states`, and `law_syncs`. `law_embeddings` contains
+the vector, law/section identifiers, hashes, source URLs, the Wikisource revision, and status, but
+never the statutory text. During analysis, the closest active vectors are selected first; their
+exact Wikisource revision is then fetched into memory, re-hashed, used as model context, and
+discarded. A hash mismatch fails closed.
+
+Configure an Atlas Vector Search index named by `MONGODB_VECTOR_INDEX` over the `embedding` field
+using cosine similarity, and add `status` as a filter field. In a horizontally scaled deployment,
+run the hourly scheduler in exactly one worker or protect it with a distributed lease.
+
+The Knesset metadata and official publications remain the legal source of record. Wikisource is a
+secondary consolidated source linked by the Knesset, not an official publication. When exposing
+user-facing citations, include its source URL and revision and comply with the applicable CC BY-SA
+attribution/share-alike terms.
 
 ## Analysis modes
 
-`ANALYSIS_PROVIDER=deterministic` is the safe local and CI mode. It implements the documented
+`ANALYSIS_PROVIDER=deterministic` is a local and CI fixture mode and is rejected in production. It implements the documented
 two-track assessment for the executable fixtures, applies the statutory security cap and repair
 rule, evaluates tenant preference conflicts, detects missing protections, and never needs cloud
 credentials.
 
 `ANALYSIS_PROVIDER=anthropic` is the RAG mode from the Project Book. Each already-redacted clause
-is embedded with OpenAI, the five closest law chunks are retrieved from Atlas Vector Search, and
-Claude returns a structured assessment. Claude does not choose the color: the backend always
+is embedded with OpenAI, the five closest verified law vectors are retrieved from Atlas Vector
+Search, their source text is hydrated temporarily, and Claude returns a structured assessment.
+Claude does not choose the color: the backend always
 applies the deterministic rule `violation -> RED`, `risk/preference conflict -> ORANGE`, otherwise
 `OK`. A claimed violation without a retrieved legal reference is rejected instead of being shown
 to the tenant.

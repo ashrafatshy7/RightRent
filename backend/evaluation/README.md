@@ -86,9 +86,9 @@ installed.
 
 ## Legal-source policy
 
-`law/fair-rental-law-sections.json` contains engineering summaries, not authoritative
-statutory text and not legal advice. The production RAG corpus must be generated from a
-verified, current consolidated version of the law.
+`law/fair-rental-law-sections.json` contains test reference IDs only. It intentionally contains
+no statutory text or summaries. The production RAG corpus is generated from a reviewed, current
+consolidated version and persists embeddings rather than the source text.
 
 The official source of record is the Knesset National Legislation Database:
 

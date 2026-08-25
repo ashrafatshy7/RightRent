@@ -46,6 +46,10 @@ if (nodeEnv === "production" && dataDriver !== "mongodb") {
   throw new Error("DATA_DRIVER must be mongodb in production.");
 }
 
+if (nodeEnv === "production" && analysisProvider !== "anthropic") {
+  throw new Error("ANALYSIS_PROVIDER must be anthropic in production so legal claims use the verified RAG corpus.");
+}
+
 if (analysisProvider === "anthropic" && (!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY)) {
   throw new Error("OPENAI_API_KEY and ANTHROPIC_API_KEY are required when ANALYSIS_PROVIDER=anthropic.");
 }
@@ -67,7 +71,6 @@ export const env = Object.freeze({
   bcryptRounds: integer("BCRYPT_ROUNDS", 12, 10, 15),
   corsOrigins: csv(process.env.CORS_ORIGINS),
   internalApiToken: process.env.INTERNAL_API_TOKEN,
-  lawSourceUrl: process.env.LAW_SOURCE_URL,
   openAiApiKey: process.env.OPENAI_API_KEY,
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
