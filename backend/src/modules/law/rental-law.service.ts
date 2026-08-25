@@ -1,36 +1,52 @@
-import * as cheerio from "cheerio";
-import type { Cheerio, CheerioAPI } from "cheerio";
-import type { AnyNode } from "domhandler";
 import { HttpError } from "../../shared/http/http-error.js";
+import { CURRENT_RENTAL_LAW_SECTIONS } from "./rental-law.snapshot.js";
+import type { RentalLawClause } from "./rental-law.types.js";
+
+export type { RentalLawClause } from "./rental-law.types.js";
 
 const ISRAEL_LAW_ID = 2_000_596;
+const FUTURE_GUARANTEE_EFFECTIVE_DATE = "2026-09-30";
+const LATEST_SUPPORTED_PUBLICATION_DATE = "2026-03-31";
+
 const KNESSET_LAW_URL = `https://main.knesset.gov.il/apps/legislation/main/laws/${ISRAEL_LAW_ID}`;
-const KNESSET_ODATA_URL = `https://knesset.gov.il/Odata/ParliamentInfo.svc/KNS_IsraelLaw(${ISRAEL_LAW_ID})?$format=json`;
-const WIKISOURCE_PAGE_URL = "https://he.wikisource.org/wiki/חוק_השכירות_והשאילה";
-const WIKISOURCE_API_URL = "https://he.wikisource.org/w/api.php";
+const KNESSET_ODATA_BASE_URL = "https://knesset.gov.il/Odata/ParliamentInfo.svc";
+const KNESSET_LAW_ODATA_URL = `${KNESSET_ODATA_BASE_URL}/KNS_IsraelLaw(${ISRAEL_LAW_ID})?$format=json`;
+const KNESSET_BINDINGS_ODATA_URL = `${KNESSET_ODATA_BASE_URL}/KNS_LawBinding?$format=json&$filter=IsraelLawID%20eq%20${ISRAEL_LAW_ID}&$orderby=LawBindingID`;
 
-const NUMBER_CLASS_RE = /^law-number(\d*)$/u;
-const CONTENT_CLASS_RE = /^law-content(\d*)$/u;
-const SECTION_NUMBER_RE = /^\d+[א-ת]{0,2}$/u;
-const EFFECTIVE_DATE_RE = /החל מיום\s+(\d{1,2})\.(\d{1,2})\.(\d{4})/u;
-const MARKER_ONLY_RE = /^\(?החל מיום\s+\d{1,2}\.\d{1,2}\.\d{4}\)?:?$/u;
-const INACTIVE_TEXTS = new Set([
-  "(בוטל).",
-  "(בוטלה).",
-  "(בטל).",
-  "(בטלה).",
-  "בוטל.",
-  "בוטלה.",
-  "בטל.",
-  "בטלה.",
-]);
+const OFFICIAL_DOCUMENTS = [
+  {
+    lawId: 148_733,
+    kind: "original",
+    publicationDate: "1971-08-05",
+    url: "https://fs.knesset.gov.il/7/law/7_lsr_209679.PDF",
+  },
+  {
+    lawId: 2_006_776,
+    kind: "amendment-1",
+    publicationDate: "2017-07-19",
+    url: "https://fs.knesset.gov.il/20/law/20_lsr_389390.pdf",
+  },
+  {
+    lawId: 2_199_304,
+    kind: "amendment-2",
+    publicationDate: "2023-02-09",
+    url: "https://fs.knesset.gov.il/25/law/25_lsr_1783627.pdf",
+  },
+  {
+    lawId: 1_046_680,
+    kind: "amendment-3",
+    publicationDate: "2026-03-31",
+    effectiveDate: FUTURE_GUARANTEE_EFFECTIVE_DATE,
+    url: "https://fs.knesset.gov.il/25/law/25_lsr_12846788.pdf",
+  },
+] as const;
 
-export type RentalLawClause = {
-  number: string;
-  title: string | null;
-  content: string;
-  children: RentalLawClause[];
-};
+const SUPPORTED_BINDINGS = [
+  { lawBindingId: 45_966, lawId: 148_733, bindingType: 6_012 },
+  { lawBindingId: 56_263, lawId: 2_006_776, bindingType: 6_013 },
+  { lawBindingId: 66_078, lawId: 2_199_304, bindingType: 6_013 },
+  { lawBindingId: 67_580, lawId: 1_046_680, bindingType: 6_013 },
+] as const;
 
 type KnessetLaw = {
   IsraelLawID: number;
@@ -40,22 +56,16 @@ type KnessetLaw = {
   LawValidityDesc: string;
 };
 
-type WikisourceParseResponse = {
-  parse?: { title?: string; revid?: number; text?: string };
-  error?: unknown;
+export type KnessetLawBinding = {
+  LawBindingID: number;
+  LawID: number;
+  IsraelLawID: number;
+  BindingType: number;
 };
 
-function normalizeText(text: string) {
-  return text
-    .replace(/\s+/gu, " ")
-    .trim()
-    .replace(/־\s+/gu, "־")
-    .replace(/\s+([.,;:!?])/gu, "$1")
-    .replace(/\s+([\)\]}])/gu, "$1")
-    .replace(/([\[({])\s+/gu, "$1")
-    .replace(/״\s+/gu, "״")
-    .replace(/\s+״/gu, "״");
-}
+type ODataCollection<T> = {
+  value: T[];
+};
 
 function israelDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -68,190 +78,72 @@ function israelDate(now = new Date()) {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
-function classes($element: Cheerio<AnyNode>) {
-  return ($element.attr("class") ?? "").split(/\s+/u).filter(Boolean);
+function cloneSections() {
+  return structuredClone(CURRENT_RENTAL_LAW_SECTIONS);
 }
 
-function matchingLevel($element: Cheerio<AnyNode>, pattern: RegExp) {
-  for (const className of classes($element)) {
-    const match = pattern.exec(className);
-    if (match) return Number(match[1] || 1);
+function applyGuaranteeAmendment(sections: RentalLawClause[]) {
+  const guarantee = sections.find((section) => section.number === "25י");
+  const definitions = guarantee?.children.find((section) => section.number === "(א)");
+  const limit = guarantee?.children.find((section) => section.number === "(ב)");
+  if (!guarantee || !definitions || !limit) {
+    throw new Error("The supported rental-law snapshot is missing section 25י.");
   }
-  return null;
+
+  definitions.content = "בסעיף זה – ”נותן ערבות אחר“ – בעל רישיון למתן אשראי, בעל רישיון למתן שירותי פיקדון ואשראי, בעל רישיון נותן שירותי תשלום יציבותי או מבטח; לעניין הגדרה זו – ”בעל רישיון נותן שירותי תשלום יציבותי“ – מי שבידו רישיון נותן תשלום יציבותי כהגדרתו בסעיף 36ט לחוק הבנקאות (רישוי), התשמ״א–1981; ”מבטח“ – כהגדרתו בחוק הפיקוח על שירותים פיננסיים (ביטוח), התשמ״א–1981; ”רישיון למתן אשראי“ ו”רישיון למתן שירותי פיקדון ואשראי“ – כהגדרתם בחוק הפיקוח על שירותים פיננסיים (שירותים פיננסיים מוסדרים), התשע״ו–2016; ”ערובה“ – ערובה לשם הבטחת חיובי השוכר הנובעים מחוזה השכירות למגורים.";
+  limit.content = limit.content.replace(
+    "ערבות בנקאית או מזומן",
+    "ערבות בנקאית, ערבות מנותן ערבות אחר או מזומן",
+  );
 }
 
-function classify($element: Cheerio<AnyNode>): ["number" | "content" | "desc" | null, number | null] {
-  const numberLevel = matchingLevel($element, NUMBER_CLASS_RE);
-  if (numberLevel !== null) return ["number", numberLevel];
-  const contentLevel = matchingLevel($element, CONTENT_CLASS_RE);
-  if (contentLevel !== null) return ["content", contentLevel];
-  const classNames = new Set(classes($element));
-  if (classNames.has("law-desc") || classNames.has("law-sec-desc")) return ["desc", null];
-  return [null, null];
+export function buildRentalLawSections(asOf: string) {
+  const sections = cloneSections();
+  if (asOf >= FUTURE_GUARANTEE_EFFECTIVE_DATE) applyGuaranteeAmendment(sections);
+  return sections;
 }
 
-function cleanText($: CheerioAPI, element: AnyNode, dropNotes: boolean, extraSelectors: string[] = []) {
-  const $clone = $(element).clone();
-  const selectors = [".mw-editsection", "sup.reference", ...extraSelectors];
-  if (dropNotes) selectors.push(".law-note", ".graytext");
-  $clone.find(selectors.join(",")).remove();
-  return normalizeText($clone.text());
-}
-
-function dateFromNote(text: string) {
-  const match = EFFECTIVE_DATE_RE.exec(text);
-  if (!match?.[1] || !match[2] || !match[3]) return null;
-  return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
-}
-
-function removeDeeperContentSiblings($: CheerioAPI, $owner: Cheerio<AnyNode>, ownerLevel: number) {
-  for (const sibling of $owner.nextAll().toArray()) {
-    const $sibling = $(sibling);
-    const [kind, level] = classify($sibling);
-    if ((kind === "number" || kind === "content") && level !== null && level <= ownerLevel) break;
-    if (kind === "content" && level !== null && level > ownerLevel) $sibling.remove();
+export function assertSupportedKnessetVersion(law: KnessetLaw, bindings: KnessetLawBinding[]) {
+  if (law.IsraelLawID !== ISRAEL_LAW_ID || law.LawValidityDesc !== "תקף") {
+    throw new HttpError(
+      503,
+      "RENTAL_LAW_NOT_VALID",
+      "The rental law is not currently marked as valid by the Knesset.",
+    );
   }
-}
 
-function filterByEffectiveDate($: CheerioAPI, asOf: string) {
-  for (const note of $("span.law-note").toArray()) {
-    const $note = $(note);
-    const noteText = normalizeText($note.text());
-    const effectiveDate = dateFromNote(noteText);
-    if (!effectiveDate) continue;
+  const latestPublicationDate = law.LatestPublicationDate.slice(0, 10);
+  const actual = bindings
+    .map(({ LawBindingID, LawID, IsraelLawID, BindingType }) => ({
+      lawBindingId: LawBindingID,
+      lawId: LawID,
+      israelLawId: IsraelLawID,
+      bindingType: BindingType,
+    }))
+    .sort((left, right) => left.lawBindingId - right.lawBindingId);
+  const expected = SUPPORTED_BINDINGS.map(({ lawBindingId, lawId, bindingType }) => ({
+    lawBindingId,
+    lawId,
+    israelLawId: ISRAEL_LAW_ID,
+    bindingType,
+  })).sort((left, right) => left.lawBindingId - right.lawBindingId);
 
-    const $owner = $note.closest("div").first();
-    const [kind, level] = classify($owner);
-    const markerOnly = MARKER_ONLY_RE.test(noteText);
-
-    if (effectiveDate > asOf) {
-      if (markerOnly && kind === "content" && level !== null) {
-        removeDeeperContentSiblings($, $owner, level);
-        $owner.remove();
-      } else {
-        $note.remove();
-      }
-      continue;
-    }
-
-    if (markerOnly) {
-      $note.remove();
-      continue;
-    }
-
-    const activeText = noteText
-      .replace(/^\(?החל מיום\s+\d{1,2}\.\d{1,2}\.\d{4}:?\s*/u, "")
-      .replace(/\)$/u, "");
-    $note.replaceWith(activeText);
+  if (latestPublicationDate !== LATEST_SUPPORTED_PUBLICATION_DATE
+    || JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new HttpError(
+      503,
+      "RENTAL_LAW_REVIEW_REQUIRED",
+      "The Knesset published a rental-law version that has not been consolidated by this service yet.",
+      {
+        latestPublicationDate,
+        expectedLawBindingIds: expected.map(({ lawBindingId }) => lawBindingId),
+        actualLawBindingIds: actual.map(({ lawBindingId }) => lawBindingId),
+      },
+    );
   }
 }
 
-function hasLawAncestor($: CheerioAPI, element: AnyNode) {
-  return $(element).parents().toArray().some((parent) => {
-    const [kind] = classify($(parent));
-    return kind !== null;
-  });
-}
-
-function appendContent(node: RentalLawClause, text: string) {
-  if (!text) return;
-  node.content = node.content ? `${node.content} ${text}` : text;
-}
-
-function attachNode(stack: Array<[number, RentalLawClause]>, level: number, node: RentalLawClause) {
-  while (stack.length && stack.at(-1)![0] >= level) stack.pop();
-  const parent = stack.at(-1)?.[1];
-  if (!parent) throw new Error("The Wikisource law hierarchy is invalid.");
-  parent.children.push(node);
-  stack.push([level, node]);
-}
-
-function pruneInactive(nodes: RentalLawClause[]): RentalLawClause[] {
-  return nodes.flatMap((node) => {
-    const children = pruneInactive(node.children);
-    const content = normalizeText(node.content);
-    const inactive = children.length === 0
-      && (INACTIVE_TEXTS.has(content) || content.startsWith("הנוסח שולב "));
-    return inactive ? [] : [{ ...node, content, children }];
-  });
-}
-
-export function parseCurrentRentalLaw(html: string, asOf: string) {
-  const $ = cheerio.load(html);
-  filterByEffectiveDate($, asOf);
-  let $container = $.root() as Cheerio<AnyNode>;
-  for (const selector of ["#law-content", "div.law", ".mw-parser-output"]) {
-    const $candidate = $(selector).first();
-    if ($candidate.length) {
-      $container = $candidate as Cheerio<AnyNode>;
-      break;
-    }
-  }
-
-  const root: RentalLawClause = { number: "", title: null, content: "", children: [] };
-  const stack: Array<[number, RentalLawClause]> = [[0, root]];
-  let pendingNode: RentalLawClause | null = null;
-  let pendingLevel: number | null = null;
-  let currentAppendix: RentalLawClause | null = null;
-
-  for (const element of $container.find("div,h2,h3,h4,p").toArray()) {
-    const $element = $(element);
-    if (element.type === "tag" && element.name === "h2") {
-      const heading = cleanText($, element, true);
-      if (heading.startsWith("תוספת ")) {
-        const appendix: RentalLawClause = { number: heading, title: null, content: "", children: [] };
-        root.children.push(appendix);
-        stack.splice(0, stack.length, [0, root], [1, appendix]);
-        currentAppendix = appendix;
-        pendingNode = null;
-        pendingLevel = null;
-      } else {
-        currentAppendix = null;
-      }
-      continue;
-    }
-
-    if (currentAppendix && element.type === "tag" && element.name === "h3") {
-      const heading = cleanText($, element, true);
-      if (heading && currentAppendix.title === null) currentAppendix.title = heading;
-      continue;
-    }
-
-    if (currentAppendix && element.type === "tag" && element.name === "p" && !hasLawAncestor($, element)) {
-      const text = cleanText($, element, false);
-      if (text && !text.startsWith("[תיקון")) appendContent(currentAppendix, text);
-      continue;
-    }
-
-    if (element.type !== "tag" || element.name !== "div") continue;
-    const [kind, level] = classify($element);
-    if (kind === "number" && level !== null) {
-      const number = cleanText($, element, true, [".law-desc", ".law-sec-desc"]).replace(/\.$/u, "");
-      if (!number) continue;
-      const node: RentalLawClause = { number, title: null, content: "", children: [] };
-      attachNode(stack, level, node);
-      pendingNode = node;
-      pendingLevel = level;
-    } else if (kind === "desc" && pendingNode) {
-      const title = cleanText($, element, true);
-      if (title) pendingNode.title = title;
-    } else if (kind === "content" && level !== null) {
-      const text = cleanText($, element, false);
-      if (pendingNode && pendingLevel === level) {
-        appendContent(pendingNode, text);
-        pendingNode = null;
-        pendingLevel = null;
-      } else {
-        const current = stack.at(-1)?.[1];
-        if (current) appendContent(current, text);
-      }
-    }
-  }
-
-  return pruneInactive(root.children);
-}
-
-async function fetchJson<T>(url: string | URL) {
+async function fetchJson<T>(url: string) {
   const response = await fetch(url, {
     headers: { accept: "application/json", "user-agent": "RightRent/0.1 law-reader" },
     signal: AbortSignal.timeout(30_000),
@@ -262,29 +154,15 @@ async function fetchJson<T>(url: string | URL) {
 
 export async function getCurrentRentalLaw() {
   const asOf = israelDate();
-  const wikiUrl = new URL(WIKISOURCE_API_URL);
-  wikiUrl.search = new URLSearchParams({
-    action: "parse",
-    page: "חוק השכירות והשאילה",
-    format: "json",
-    formatversion: "2",
-    prop: "text|revid",
-  }).toString();
 
   try {
-    const [law, wiki] = await Promise.all([
-      fetchJson<KnessetLaw>(KNESSET_ODATA_URL),
-      fetchJson<WikisourceParseResponse>(wikiUrl),
+    const [law, bindingResponse] = await Promise.all([
+      fetchJson<KnessetLaw>(KNESSET_LAW_ODATA_URL),
+      fetchJson<ODataCollection<KnessetLawBinding>>(KNESSET_BINDINGS_ODATA_URL),
     ]);
-    if (law.IsraelLawID !== ISRAEL_LAW_ID || law.LawValidityDesc !== "תקף") {
-      throw new HttpError(503, "RENTAL_LAW_NOT_VALID", "The rental law is not currently marked as valid by the Knesset.");
-    }
-    if (wiki.error || !wiki.parse?.text) throw new Error("Wikisource did not return rendered law text.");
+    assertSupportedKnessetVersion(law, bindingResponse.value);
 
-    const sections = parseCurrentRentalLaw(wiki.parse.text, asOf);
-    const mainSectionCount = sections.filter((section) => SECTION_NUMBER_RE.test(section.number)).length;
-    if (mainSectionCount < 40) throw new Error("The parsed rental law is missing too many main sections.");
-
+    const sections = buildRentalLawSections(asOf);
     return {
       israelLawId: ISRAEL_LAW_ID,
       name: law.Name,
@@ -292,12 +170,15 @@ export async function getCurrentRentalLaw() {
       asOf,
       publicationDate: law.PublicationDate,
       latestOfficialPublicationDate: law.LatestPublicationDate,
-      revisionId: wiki.parse.revid ?? null,
-      mainSectionCount,
+      mainSectionCount: sections.filter((section) => /^\d+[א-ת]{0,2}$/u.test(section.number)).length,
       appendixCount: sections.filter((section) => section.number.startsWith("תוספת ")).length,
       sources: {
         officialMetadata: KNESSET_LAW_URL,
-        consolidatedText: WIKISOURCE_PAGE_URL,
+        officialOData: {
+          law: KNESSET_LAW_ODATA_URL,
+          bindings: KNESSET_BINDINGS_ODATA_URL,
+        },
+        officialPublications: OFFICIAL_DOCUMENTS,
       },
       sections,
     };

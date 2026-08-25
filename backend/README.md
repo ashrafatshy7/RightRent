@@ -61,7 +61,8 @@ Public:
 
 - `GET /api/health`
 - `GET /api/laws/rental/current` — the currently effective consolidated Rental and Lending Law;
-  Knesset metadata is verified on every request and future or repealed Wikisource provisions are omitted
+  only official Knesset OData and publications are used. The service verifies the known law bindings
+  on every request and fails closed when the Knesset publishes an amendment that still requires review
 - `POST /api/auth/register` — `{ "email": string, "password": string }`
 - `POST /api/auth/login` — `{ "email": string, "password": string }`
 
