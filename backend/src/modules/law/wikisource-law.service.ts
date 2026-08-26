@@ -23,6 +23,7 @@ const INACTIVE_TEXTS = new Set([
   "בטל.",
   "בטלה.",
 ]);
+const MIN_EMBEDDING_CHARS = 20;
 const MAX_EMBEDDING_CHARS = 6_000;
 
 export type ParsedLawClause = {
@@ -283,12 +284,29 @@ function sectionKey(section: string | null, index: number) {
 
 export function buildLawChunks(israelLawId: number, clauses: ParsedLawClause[]) {
   const chunks: ParsedLawChunk[] = [];
+  const baseReferences = clauses.map((clause, index) =>
+    `IL-${israelLawId}-${sectionKey(clause.number || null, index)}`
+  );
+  const referenceCounts = new Map<string, number>();
+  const referenceOccurrences = new Map<string, number>();
+  for (const reference of baseReferences) {
+    referenceCounts.set(reference, (referenceCounts.get(reference) ?? 0) + 1);
+  }
+
   for (const [clauseIndex, clause] of clauses.entries()) {
     const textParts = splitText(renderClause(clause));
+    const baseReference = baseReferences[clauseIndex]!;
+    const occurrence = (referenceOccurrences.get(baseReference) ?? 0) + 1;
+    referenceOccurrences.set(baseReference, occurrence);
+    const uniqueReference = referenceCounts.get(baseReference)! > 1
+      ? `${baseReference}-INSTANCE-${occurrence}`
+      : baseReference;
     for (const [partIndex, text] of textParts.entries()) {
-      const baseReference = `IL-${israelLawId}-${sectionKey(clause.number || null, clauseIndex)}`;
+      if (text.length < MIN_EMBEDDING_CHARS) continue;
       chunks.push({
-        referenceId: textParts.length === 1 ? baseReference : `${baseReference}-P${partIndex + 1}`,
+        referenceId: textParts.length === 1
+          ? uniqueReference
+          : `${uniqueReference}-P${partIndex + 1}`,
         section: clause.number || null,
         sourceOrdinal: chunks.length,
         text,
@@ -395,7 +413,7 @@ export async function fetchWikisourceLawVersion(
   const chunks = buildLawChunks(
     source.israelLawId,
     parseWikisourceLaw(response.parse.text, sourceAsOf),
-  ).filter((chunk) => chunk.text.length >= 20);
+  );
   if (!chunks.length) throw new Error(`No law sections were extracted from ${source.wikisourceTitle}.`);
   const sectionKeys = chunks.map((chunk) => chunk.referenceId);
   if (new Set(sectionKeys).size !== sectionKeys.length

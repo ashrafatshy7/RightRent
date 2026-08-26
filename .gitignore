@@ -6,4 +6,9 @@ backend/evaluation/results/
 backend/.env
 backend/storage/uploads/
 backend/storage/marked-pdfs/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.env
+frontend/.env.local
 tmp/

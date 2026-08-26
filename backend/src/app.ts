@@ -1,5 +1,6 @@
 import express from "express";
 import helmet from "helmet";
+import { adminRouter } from "./modules/admin/admin.routes.js";
 import { analysesRouter } from "./modules/analyses/analyses.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { contractsRouter } from "./modules/contracts/contracts.routes.js";
@@ -24,6 +25,7 @@ app.use(express.json({ limit: "1mb" }));
 
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/admin", adminRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/contracts", contractsRouter);
 app.use("/api/analyses", analysesRouter);

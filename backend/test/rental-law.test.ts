@@ -49,6 +49,31 @@ test("a future effective provision produces different embedding input", () => {
   assert.match(future.find((chunk) => chunk.section === "25י")?.text ?? "", /נותן ערבות אחר/u);
 });
 
+test("repeated section numbers receive stable unique manifest identifiers", () => {
+  const clause = (number: string, content: string) => ({
+    number,
+    title: null,
+    content,
+    children: [],
+  });
+  const chunks = buildLawChunks(2_000_237, [
+    clause("1", "הסעיף הראשון בחוק הראשי."),
+    clause("9", "קצר"),
+    clause("2", "סעיף שמספרו ייחודי במקור."),
+    clause("1", "פרט מספר אחת בתוספת הראשונה."),
+    clause("1", "פרט מספר אחת בתוספת השנייה."),
+  ]);
+
+  assert.deepEqual(chunks.map((chunk) => chunk.referenceId), [
+    "IL-2000237-1-INSTANCE-1",
+    "IL-2000237-2",
+    "IL-2000237-1-INSTANCE-2",
+    "IL-2000237-1-INSTANCE-3",
+  ]);
+  assert.deepEqual(chunks.map((chunk) => chunk.sourceOrdinal), [0, 1, 2, 3]);
+  assert.equal(new Set(chunks.map((chunk) => chunk.referenceId)).size, chunks.length);
+});
+
 test("a new Knesset binding changes the official fingerprint", () => {
   const law = {
     IsraelLawID: 2_000_596,

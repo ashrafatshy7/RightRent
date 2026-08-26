@@ -46,6 +46,7 @@ const piiNerMode = choice(
   process.env.PII_NER_MODE ?? "regex",
   ["regex", "dictabert"] as const,
 );
+const adminEmails = csv(process.env.ADMIN_EMAILS).map((email) => email.toLowerCase());
 const manageMongoVectorIndex = choice(
   "MONGODB_MANAGE_VECTOR_INDEX",
   process.env.MONGODB_MANAGE_VECTOR_INDEX ?? "true",
@@ -93,6 +94,7 @@ export const env = Object.freeze({
   jwtExpiresInSeconds: integer("JWT_EXPIRES_IN_SECONDS", 60 * 60 * 24, 300, 2_592_000),
   bcryptRounds: integer("BCRYPT_ROUNDS", 12, 10, 15),
   corsOrigins: csv(process.env.CORS_ORIGINS),
+  adminEmails,
   internalApiToken: process.env.INTERNAL_API_TOKEN,
   openAiApiKey: process.env.OPENAI_API_KEY,
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",

@@ -12,6 +12,7 @@ import { app } from "../src/app.js";
 let server: Server;
 let baseUrl: string;
 let token: string;
+let adminToken: string;
 let contractId: string | undefined;
 let analysisId: string | undefined;
 let secondAnalysisId: string | undefined;
@@ -59,7 +60,19 @@ before(async () => {
     body: JSON.stringify({ email: "tenant@example.com", password: "correct-horse-battery-staple" }),
   });
   assert.equal(response.status, 201);
-  token = (await response.json()).token;
+  const registration = await response.json();
+  token = registration.token;
+  assert.equal(registration.user.role, "TENANT");
+
+  const adminResponse = await fetch(`${baseUrl}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "admin@example.com", password: "admin-correct-horse-battery-staple" }),
+  });
+  assert.equal(adminResponse.status, 201);
+  const adminRegistration = await adminResponse.json();
+  adminToken = adminRegistration.token;
+  assert.equal(adminRegistration.user.role, "ADMIN");
 });
 
 after(async () => {
@@ -107,7 +120,29 @@ test("protected routes require a valid Bearer token", async () => {
   assert.equal((await response.json()).error.code, "AUTHENTICATION_REQUIRED");
 });
 
+test("current-user and law administration enforce the server-side admin allowlist", async () => {
+  const me = await fetch(`${baseUrl}/api/auth/me`, authenticated());
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).user.role, "TENANT");
+
+  const tenantAttempt = await fetch(`${baseUrl}/api/admin/laws/status`, authenticated());
+  assert.equal(tenantAttempt.status, 403);
+  assert.equal((await tenantAttempt.json()).error.code, "ADMINISTRATOR_REQUIRED");
+
+  const adminStatus = await fetch(`${baseUrl}/api/admin/laws/status`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(adminStatus.status, 200);
+  assert.deepEqual((await adminStatus.json()).laws, []);
+});
+
 test("cross-site state changes and XSS-shaped JSON are rejected", async () => {
+  const localFrontend = await fetch(`${baseUrl}/api/auth/me`, authenticated({
+    headers: { origin: "http://127.0.0.1:5173" },
+  }));
+  assert.equal(localFrontend.status, 200);
+  assert.equal(localFrontend.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173");
+
   const crossSite = await fetch(`${baseUrl}/api/users/preferences`, authenticated({
     method: "PUT",
     headers: { "content-type": "application/json", origin: "https://evil.example" },
