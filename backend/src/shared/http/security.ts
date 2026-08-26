@@ -1,11 +1,15 @@
+import { createHash } from "node:crypto";
 import type { RequestHandler } from "express";
 import { env } from "../../config/env.js";
+import { getStore } from "../data/store.js";
 import { HttpError } from "./http-error.js";
-
-const requests = new Map<string, { windowStartedAt: number; count: number }>();
 
 export const cors: RequestHandler = (request, response, next) => {
   const origin = request.header("origin");
+  if (origin && !env.corsOrigins.includes(origin)) {
+    next(new HttpError(403, "ORIGIN_NOT_ALLOWED", "The request origin is not allowed."));
+    return;
+  }
   if (origin && env.corsOrigins.includes(origin)) {
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
@@ -13,10 +17,6 @@ export const cors: RequestHandler = (request, response, next) => {
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   }
   if (request.method === "OPTIONS") {
-    if (origin && !env.corsOrigins.includes(origin)) {
-      next(new HttpError(403, "ORIGIN_NOT_ALLOWED", "The request origin is not allowed."));
-      return;
-    }
     response.status(204).end();
     return;
   }
@@ -31,18 +31,20 @@ export const requireHttps: RequestHandler = (request, _response, next) => {
   next();
 };
 
-export const rateLimit: RequestHandler = (request, response, next) => {
+export const rateLimit: RequestHandler = async (request, response, next) => {
+  if (request.originalUrl.startsWith("/api/health")) {
+    next();
+    return;
+  }
   const now = Date.now();
-  const key = request.ip ?? request.socket.remoteAddress ?? "unknown";
-  const current = requests.get(key);
-  const entry = !current || now - current.windowStartedAt >= 60_000
-    ? { windowStartedAt: now, count: 1 }
-    : { ...current, count: current.count + 1 };
-  requests.set(key, entry);
+  const windowStartedAt = Math.floor(now / 60_000) * 60_000;
+  const address = request.ip ?? request.socket.remoteAddress ?? "unknown";
+  const key = `${windowStartedAt}:${createHash("sha256").update(address).digest("hex")}`;
+  const count = await (await getStore()).consumeRateLimit(key, new Date(windowStartedAt + 120_000));
   response.setHeader("RateLimit-Limit", String(env.requestLimitPerMinute));
-  response.setHeader("RateLimit-Remaining", String(Math.max(0, env.requestLimitPerMinute - entry.count)));
-  if (entry.count > env.requestLimitPerMinute) {
-    response.setHeader("Retry-After", String(Math.ceil((60_000 - (now - entry.windowStartedAt)) / 1_000)));
+  response.setHeader("RateLimit-Remaining", String(Math.max(0, env.requestLimitPerMinute - count)));
+  if (count > env.requestLimitPerMinute) {
+    response.setHeader("Retry-After", String(Math.ceil((windowStartedAt + 60_000 - now) / 1_000)));
     next(new HttpError(429, "RATE_LIMIT_EXCEEDED", "Too many requests; try again shortly."));
     return;
   }

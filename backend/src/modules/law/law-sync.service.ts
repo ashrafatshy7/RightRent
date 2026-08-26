@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { env } from "../../config/env.js";
 import type {
   LawEmbeddingRecord,
   LawSourceState,
@@ -48,7 +49,9 @@ function syncRecord(
     officialFingerprint: official?.fingerprint ?? "",
     wikisourceRevisionId: wiki?.revisionId ?? null,
     contentHash: wiki?.contentHash ?? null,
+    sectionsHash: wiki?.sectionsHash ?? null,
     checkedAt,
+    expiresAt: new Date(Date.parse(checkedAt) + env.lawSyncRetentionDays * 24 * 60 * 60 * 1_000),
     error,
   };
 }
@@ -76,14 +79,23 @@ function observedState(
     observedRevisionId: wiki.revisionId,
     observedRevisionTimestamp: wiki.revisionTimestamp,
     observedContentHash: wiki.contentHash,
+    observedSectionCount: wiki.chunks.length,
+    observedSectionsHash: wiki.sectionsHash,
+    observedSectionKeys: wiki.sectionKeys,
     activeOfficialFingerprint: previous?.activeOfficialFingerprint ?? null,
     activeRevisionId: previous?.activeRevisionId ?? null,
     activeSourceAsOf: previous?.activeSourceAsOf ?? null,
     activeContentHash: previous?.activeContentHash ?? null,
+    activeSectionCount: previous?.activeSectionCount ?? null,
+    activeSectionsHash: previous?.activeSectionsHash ?? null,
+    activeSectionKeys: previous?.activeSectionKeys ?? [],
     candidateOfficialFingerprint: candidate ? official.fingerprint : null,
     candidateRevisionId: candidate ? wiki.revisionId : null,
     candidateSourceAsOf: candidate ? wiki.sourceAsOf : null,
     candidateContentHash: candidate ? wiki.contentHash : null,
+    candidateSectionCount: candidate ? wiki.chunks.length : null,
+    candidateSectionsHash: candidate ? wiki.sectionsHash : null,
+    candidateSectionKeys: candidate ? wiki.sectionKeys : [],
     checkedAt,
     verifiedAt: previous?.verifiedAt ?? null,
     verifiedBy: previous?.verifiedBy ?? null,
@@ -98,7 +110,14 @@ function failedState(
   checkedAt: string,
   error: string,
 ): LawSourceState {
-  if (previous) return { ...previous, status: "FAILED", checkedAt, error };
+  if (previous) {
+    return {
+      ...previous,
+      status: previous.activeRevisionId ? "ACTIVE" : "FAILED",
+      checkedAt,
+      error,
+    };
+  }
   return {
     israelLawId: source.israelLawId,
     lawName: `IsraelLaw ${source.israelLawId}`,
@@ -113,14 +132,23 @@ function failedState(
     observedRevisionId: 0,
     observedRevisionTimestamp: "",
     observedContentHash: "",
+    observedSectionCount: 0,
+    observedSectionsHash: "",
+    observedSectionKeys: [],
     activeOfficialFingerprint: null,
     activeRevisionId: null,
     activeSourceAsOf: null,
     activeContentHash: null,
+    activeSectionCount: null,
+    activeSectionsHash: null,
+    activeSectionKeys: [],
     candidateOfficialFingerprint: null,
     candidateRevisionId: null,
     candidateSourceAsOf: null,
     candidateContentHash: null,
+    candidateSectionCount: null,
+    candidateSectionsHash: null,
+    candidateSectionKeys: [],
     checkedAt,
     verifiedAt: null,
     verifiedBy: null,
@@ -178,7 +206,12 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
     const activeContentUnchanged = previous?.activeContentHash === wiki.contentHash;
     const activeRevisionUnchanged = previous?.activeRevisionId === wiki.revisionId;
     if (activeOfficialUnchanged && activeContentUnchanged && activeRevisionUnchanged) {
-      const state = observedState(source, previous, official, wiki, "ACTIVE", checkedAt, false);
+      const state: LawSourceState = {
+        ...observedState(source, previous, official, wiki, "ACTIVE", checkedAt, false),
+        activeSectionCount: wiki.chunks.length,
+        activeSectionsHash: wiki.sectionsHash,
+        activeSectionKeys: wiki.sectionKeys,
+      };
       const sync = syncRecord(source, "UNCHANGED", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
       return sync;
@@ -194,6 +227,11 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
         candidateRevisionId: previous.candidateRevisionId,
         candidateSourceAsOf: previous.candidateSourceAsOf,
         candidateContentHash: previous.candidateContentHash,
+        candidateSectionCount: previous.candidateSectionCount ?? wiki.chunks.length,
+        candidateSectionsHash: previous.candidateSectionsHash ?? wiki.sectionsHash,
+        candidateSectionKeys: previous.candidateSectionKeys?.length
+          ? previous.candidateSectionKeys
+          : wiki.sectionKeys,
       };
       const sync = syncRecord(source, "UNCHANGED", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
@@ -252,6 +290,9 @@ export function syncLawKnowledgeBase() {
 export async function approveLawVersion(
   israelLawId: number,
   revisionId: number,
+  contentHash: string,
+  sectionCount: number,
+  sectionsHash: string,
   verifiedBy: string,
   verificationReference: string,
 ) {
@@ -261,6 +302,9 @@ export async function approveLawVersion(
   const active = await (await getStore()).activateLawVersion(
     israelLawId,
     revisionId,
+    contentHash,
+    sectionCount,
+    sectionsHash,
     verifiedBy,
     verificationReference,
   );

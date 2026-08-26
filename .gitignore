@@ -2,6 +2,7 @@
 backend/node_modules/
 backend/dist/
 backend/coverage/
+backend/evaluation/results/
 backend/.env
 backend/storage/uploads/
 backend/storage/marked-pdfs/

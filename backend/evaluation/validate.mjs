@@ -1,9 +1,13 @@
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 
 const evaluationRoot = path.dirname(fileURLToPath(import.meta.url));
 const failures = [];
+const ajv = new Ajv2020({ allErrors: true, strict: true });
+addFormats(ajv);
 
 function check(condition, message) {
   if (!condition) failures.push(message);
@@ -36,6 +40,25 @@ for (const jsonPath of await listJsonFiles(evaluationRoot)) {
 const annotations = await readJson("annotations/expected-findings.json");
 const lawCorpus = await readJson("law/fair-rental-law-sections.json");
 const tenantProfiles = await readJson("preferences/tenant-profiles.json");
+const expectedFindingsSchema = await readJson("schemas/expected-findings.schema.json");
+const tenantProfilesSchema = await readJson("schemas/tenant-profiles.schema.json");
+const analysisResultSchema = await readJson("schemas/analysis-result.schema.json");
+
+for (const [name, schema] of [
+  ["expected findings", expectedFindingsSchema],
+  ["tenant profiles", tenantProfilesSchema],
+  ["analysis result", analysisResultSchema],
+]) {
+  try {
+    ajv.compile(schema);
+  } catch (error) {
+    failures.push(`${name} JSON Schema is invalid: ${error.message}`);
+  }
+}
+const validateExpectedFindings = ajv.compile(expectedFindingsSchema);
+const validateTenantProfiles = ajv.compile(tenantProfilesSchema);
+check(validateExpectedFindings(annotations), `Expected-findings data violates its schema: ${ajv.errorsText(validateExpectedFindings.errors)}`);
+check(validateTenantProfiles(tenantProfiles), `Tenant-profile data violates its schema: ${ajv.errorsText(validateTenantProfiles.errors)}`);
 
 const lawIds = new Set(lawCorpus.sections.map((section) => section.id));
 const profileIds = new Set(tenantProfiles.profiles.map((profile) => profile.id));

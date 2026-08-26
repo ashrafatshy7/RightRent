@@ -147,11 +147,11 @@ export async function advanceNegotiation(analysisId: string, userId: string, act
     }
   } else if (action.action === "SAVE_DRAFT") {
     requireState(negotiation, "DRAFT");
-    const safeDraft = redactClauses([{
+    const safeDraft = (await redactClauses([{
       id: "DRAFT",
       text: action.draft,
       locations: [],
-    }]).clauses[0]!.text;
+    }])).clauses[0]!.text;
     const likelyReplies = env.analysisProvider === "anthropic"
       ? await generateLikelyLandlordReplies(safeDraft)
       : [

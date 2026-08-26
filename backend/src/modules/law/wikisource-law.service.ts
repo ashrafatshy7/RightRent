@@ -63,6 +63,8 @@ export type WikisourceLawVersion = {
   sourceAsOf: string;
   chunks: ParsedLawChunk[];
   contentHash: string;
+  sectionKeys: string[];
+  sectionsHash: string;
 };
 
 function normalizeText(text: string) {
@@ -395,6 +397,11 @@ export async function fetchWikisourceLawVersion(
     parseWikisourceLaw(response.parse.text, sourceAsOf),
   ).filter((chunk) => chunk.text.length >= 20);
   if (!chunks.length) throw new Error(`No law sections were extracted from ${source.wikisourceTitle}.`);
+  const sectionKeys = chunks.map((chunk) => chunk.referenceId);
+  if (new Set(sectionKeys).size !== sectionKeys.length
+    || chunks.some((chunk, index) => chunk.sourceOrdinal !== index)) {
+    throw new Error(`The extracted section manifest for ${source.wikisourceTitle} is not unique and sequential.`);
+  }
 
   return {
     title: source.wikisourceTitle,
@@ -403,6 +410,8 @@ export async function fetchWikisourceLawVersion(
     revisionTimestamp: revision.revisionTimestamp,
     sourceAsOf,
     chunks,
+    sectionKeys,
+    sectionsHash: createHash("sha256").update(JSON.stringify(sectionKeys)).digest("hex"),
     contentHash: createHash("sha256")
       .update(chunks.map((chunk) => chunk.contentHash).join(":"))
       .digest("hex"),

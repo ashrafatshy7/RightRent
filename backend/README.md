@@ -15,12 +15,18 @@ every candidate consolidation against the official publication before activating
 - MongoDB Atlas for production; local development can use the in-memory data store
 - OpenAI credentials for law synchronization and vector retrieval
 - Anthropic credentials when `ANALYSIS_PROVIDER=anthropic`
+- Docker (or Python 3.11) for the local DictaBERT Hebrew NER sidecar
 
 ```bash
 cp .env.example .env
 npm install
 npm run dev
 ```
+
+`ANALYSIS_PROVIDER=deterministic` is the offline fixture mode. Before enabling
+`ANALYSIS_PROVIDER=anthropic`, start `services/hebrew-ner`, set
+`PII_NER_MODE=dictabert`, and configure the same private `PII_NER_TOKEN` in both
+processes. Startup rejects Anthropic mode when NER is left in regex-only mode.
 
 Local `.env` values are loaded automatically; process-level variables take precedence. Production startup rejects a
 missing `MONGODB_URI`, a short `JWT_SECRET`, and non-HTTPS requests (the app trusts one reverse
@@ -36,14 +42,20 @@ npm run build
 npm run check
 ```
 
+`npm test` forces the in-memory store and temporary file directories, so it cannot mutate the
+MongoDB configured in `.env`. `npm run build` removes the previous generated `dist` before compiling,
+preventing deleted source modules from surviving as stale production code.
+
 ## Security and privacy behavior
 
 - Passwords are hashed with bcrypt; JWTs are signed, time-limited, issuer-bound, and audience-bound.
 - All tenant data routes require a Bearer token and enforce resource ownership.
 - Contract files are limited to one PDF and 10 MB, checked by MIME type, signature, and PDF parser,
   stored under UUID names, and written with private file permissions.
-- Names, identity numbers, phone numbers, and addresses are redacted locally before any AI call.
-  Monetary values remain because legal caps and budget preferences depend on them.
+- A regex pass removes direct identifiers and a local `dicta-il/dictabert-ner` pass removes Hebrew
+  people, organizations, and locations before any cloud AI call. Residual IDs, phones, email
+  addresses, or IBANs stop analysis fail-closed. Monetary values remain because legal caps and
+  budget preferences depend on them.
 - Contract text is always presented to Claude as untrusted data, so embedded prompt instructions
   are never treated as system instructions.
 - The law-sync endpoints use a separate internal token. Sources come from a fixed allowlist of
@@ -53,14 +65,16 @@ npm run check
   so they do not rely on ambient browser credentials and are resistant to CSRF.
 - Deleting a history item removes the analysis record, contract record, original PDF, and marked PDF.
 
-For a horizontally scaled production deployment, replace the process-local rate limiter with a
-shared store at the infrastructure layer.
+MongoDB-backed deployments share rate-limit counters across application instances; the in-memory
+driver keeps equivalent process-local counters for tests and offline development.
 
 ## API
 
 Public:
 
 - `GET /api/health`
+- `GET /api/health/ready` — database readiness and, in RAG mode, all 13 active laws,
+  Vector Search, and local NER readiness
 - `POST /api/auth/register` — `{ "email": string, "password": string }`
 - `POST /api/auth/login` — `{ "email": string, "password": string }`
 
@@ -86,7 +100,9 @@ Internal maintenance:
 - `POST /internal/law/sync` with `X-Internal-Token`
 - `GET /internal/law/status` with `X-Internal-Token`
 - `POST /internal/law/:israelLawId/approve` with `X-Internal-Token` and
-  `{ "revisionId": number, "verifiedBy": string, "verificationReference": string }`
+  `{ "revisionId": number, "contentHash": string, "sectionCount": number,
+  "sectionsHash": string, "confirmedComplete": true, "verifiedBy": string,
+  "verificationReference": string }`
 
 The server starts an immediate source check and repeats it every hour. For each monitored law it
 builds an official fingerprint from `KNS_IsraelLaw` and the sorted `KNS_LawBinding` rows, then
@@ -96,7 +112,9 @@ revision without a Knesset change is marked `WIKISOURCE_CHANGED`. When the offic
 and effective rendered text change together, OpenAI embeddings are staged as
 `AWAITING_VERIFICATION`. A same-revision content change caused by reaching a marked effective date
 is staged for the same review. Candidate vectors become searchable only after the internal approval
-endpoint records the reviewer and official verification reference. OData supplies change metadata,
+endpoint records the exact content hash, complete section manifest, reviewer, and official
+verification reference. The status response exposes candidate section keys for that review.
+OData supplies change metadata,
 not the consolidated section text or a reliable effective-date interpretation.
 
 MongoDB stores `law_embeddings`, `law_source_states`, and `law_syncs`. `law_embeddings` contains
@@ -105,9 +123,11 @@ never the statutory text. During analysis, the closest active vectors are select
 exact Wikisource revision is then fetched into memory, re-hashed, used as model context, and
 discarded. A hash mismatch fails closed.
 
-Configure an Atlas Vector Search index named by `MONGODB_VECTOR_INDEX` over the `embedding` field
-using cosine similarity, and add `status` as a filter field. In a horizontally scaled deployment,
-run the hourly scheduler in exactly one worker or protect it with a distributed lease.
+By default the backend creates the Atlas Vector Search index named by `MONGODB_VECTOR_INDEX` with
+the configured dimensions, cosine similarity, and `status` filter. Set
+`MONGODB_MANAGE_VECTOR_INDEX=false` only when deployment infrastructure owns the index. A MongoDB
+lease prevents duplicate hourly schedulers across application instances, and new `law_syncs`
+records expire after `LAW_SYNC_RETENTION_DAYS`.
 
 The Knesset metadata and official publications remain the legal source of record. Wikisource is a
 secondary consolidated source linked by the Knesset, not an official publication. When exposing
@@ -129,6 +149,24 @@ applies the deterministic rule `violation -> RED`, `risk/preference conflict -> 
 `OK`. A claimed violation without a retrieved legal reference is rejected instead of being shown
 to the tenant.
 
-Text PDFs are extracted with `pdfjs-dist`, preserving page coordinates. Image-only PDFs are
-rendered with `@napi-rs/canvas` and passed through Tesseract.js using `OCR_LANGUAGE`. The marked
-copy is produced by `pdf-lib` without altering the original upload.
+After clause analysis, a separate contract-level Claude request evaluates every predefined
+protection as `COVERED`, `PARTIAL`, or `MISSING`, maps it to clause IDs, and suggests text for
+incomplete protections. RAG analysis is disabled unless all 13 monitored laws have approved
+`ACTIVE` versions.
+
+Text PDFs are extracted with `pdfjs-dist`, preserving text-item coordinates. Every scanned page,
+including a scanned page inside a mixed PDF, is rendered with `@napi-rs/canvas`; Tesseract.js word
+boxes are converted back to PDF coordinates. Logical clauses longer than 300 words are split near
+a 250-word target. The marked copy is produced by `pdf-lib` without altering the original upload.
+
+## Release evidence
+
+Unit and API tests do not establish the Project Book's legal targets. Put reviewed live-run JSON
+artifacts in `evaluation/results` and run `npm run evaluation:release`. The gate rejects fewer than
+10 annotated contracts and measures 90% violation recall, 95% RED/ORANGE precision, 85% missing-
+protection recall, model-bound PII leakage, and the 90-second target.
+
+Run `npm run test:load` only against a disposable staging database after setting
+`RIGHTRENT_LOAD_CONFIRM_DISPOSABLE=true`, `RIGHTRENT_BASE_URL`, and `RIGHTRENT_LOAD_PDF`. It performs
+10 concurrent user analyses. Monitor `/api/health/ready` externally during deployment to calculate
+the required 99% availability.

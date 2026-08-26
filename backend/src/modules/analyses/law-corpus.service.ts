@@ -61,6 +61,7 @@ export async function hydrateLawEmbeddings(records: LawEmbeddingRecord[]): Promi
       sourceUrl: `${record.sourceUrl}?oldid=${record.revisionId}`,
       contentHash: record.contentHash,
       revisionId: record.revisionId,
+      sourceAsOf: record.sourceAsOf,
     };
   });
 }

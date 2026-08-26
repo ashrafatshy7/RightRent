@@ -50,6 +50,7 @@ export const uploadContract: RequestHandler = async (request, response) => {
     storageKey: storedFileName,
     status: "EXTRACTED",
     isScanned: extraction.isScanned,
+    extractionMs: extraction.extractionMs,
     clauses: extraction.clauses,
     uploadedAt,
     updatedAt: uploadedAt,
@@ -71,8 +72,10 @@ export const uploadContract: RequestHandler = async (request, response) => {
       sizeBytes: contract.sizeBytes,
       status: contract.status,
       isScanned: contract.isScanned,
+      scannedPages: extraction.scannedPages,
       pageCount: extraction.pageCount,
       clauseCount: contract.clauses.length,
+      extractionMs: extraction.extractionMs,
       uploadedAt,
     },
   });

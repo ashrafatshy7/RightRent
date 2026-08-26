@@ -30,7 +30,7 @@ for (const evaluationCase of annotations.cases) {
   test(`${evaluationCase.id} satisfies the executable analysis specification`, async () => {
     const source = await readFile(path.join(evaluationRoot, evaluationCase.contractPath), "utf8");
     const extracted = extractClausesFromPlainText(source);
-    const redaction = redactClauses(extracted);
+    const redaction = await redactClauses(extracted);
     const modelBoundText = redaction.clauses.map((clause) => clause.text).join("\n");
     const profile = profiles.profiles.find((item) => item.id === evaluationCase.preferenceProfileId);
     assert.ok(profile);

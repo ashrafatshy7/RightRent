@@ -37,6 +37,42 @@
       "section": "25ז",
       "topic": "ordinary_wear_and_tear",
       "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-REPAIR-TIMELINE",
+      "section": "25ז",
+      "topic": "repair_timeline",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-SECURITY-RETURN",
+      "section": "25י",
+      "topic": "security_return",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-ENTRY-NOTICE",
+      "section": null,
+      "topic": "landlord_entry_notice",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-CHARGES-ALLOCATION",
+      "section": "25ט",
+      "topic": "charges_allocation",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-HANDOVER-CONDITION",
+      "section": null,
+      "topic": "handover_condition",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-RENEWAL-TERMS",
+      "section": null,
+      "topic": "renewal_terms",
+      "kind": "recommended_contract_protection"
     }
   ]
 }
