@@ -7,7 +7,7 @@ import { HttpError } from "../../shared/http/http-error.js";
 
 type LocatedLine = {
   text: string;
-  location: ClauseLocation;
+  locations: ClauseLocation[];
 };
 
 type PdfTextItem = {
@@ -18,22 +18,65 @@ type PdfTextItem = {
   hasEOL: boolean;
 };
 
-function unionLocations(locations: ClauseLocation[]): ClauseLocation[] {
-  const byPage = new Map<number, [number, number, number, number]>();
-  for (const location of locations) {
-    const [x, y, width, height] = location.bbox;
-    const existing = byPage.get(location.page);
-    if (!existing) {
-      byPage.set(location.page, [x, y, width, height]);
-      continue;
-    }
-    const left = Math.min(existing[0], x);
-    const bottom = Math.min(existing[1], y);
-    const right = Math.max(existing[0] + existing[2], x + width);
-    const top = Math.max(existing[1] + existing[3], y + height);
-    byPage.set(location.page, [left, bottom, right - left, top - bottom]);
+type OcrBlock = {
+  paragraphs: Array<{
+    lines: Array<{
+      text: string;
+      words: Array<{ text: string; bbox: { x0: number; y0: number; x1: number; y1: number } }>;
+    }>;
+  }>;
+};
+
+const TARGET_CHUNK_WORDS = 250;
+const MAX_CHUNK_WORDS = 300;
+
+function wordCount(text: string) {
+  return text.split(/\s+/u).filter(Boolean).length;
+}
+
+function locationsForLines(lines: LocatedLine[]) {
+  return lines.flatMap((line) => line.locations);
+}
+
+function chunkGroup(group: { id: string; lines: LocatedLine[] }): ContractClause[] {
+  if (wordCount(group.lines.map((line) => line.text).join(" ")) <= MAX_CHUNK_WORDS) {
+    return [{
+      id: group.id,
+      text: group.lines.map((line) => line.text).join("\n").trim(),
+      locations: locationsForLines(group.lines),
+    }];
   }
-  return [...byPage].map(([page, bbox]) => ({ page, bbox }));
+
+  const splittableLines = group.lines.flatMap<LocatedLine>((line) => {
+    const words = line.text.split(/\s+/u).filter(Boolean);
+    if (words.length <= MAX_CHUNK_WORDS) return [line];
+    const parts: LocatedLine[] = [];
+    for (let offset = 0; offset < words.length; offset += TARGET_CHUNK_WORDS) {
+      parts.push({ text: words.slice(offset, offset + TARGET_CHUNK_WORDS).join(" "), locations: line.locations });
+    }
+    return parts;
+  });
+  const parts: LocatedLine[][] = [];
+  let current: LocatedLine[] = [];
+  let currentWords = 0;
+  for (const line of splittableLines) {
+    const lineWords = wordCount(line.text);
+    if (current.length && currentWords + lineWords > MAX_CHUNK_WORDS
+      && currentWords >= TARGET_CHUNK_WORDS * 0.8) {
+      parts.push(current);
+      current = [];
+      currentWords = 0;
+    }
+    current.push(line);
+    currentWords += lineWords;
+  }
+  if (current.length) parts.push(current);
+
+  return parts.map((lines, index) => ({
+    id: `${group.id}-P${index + 1}`,
+    text: lines.map((line) => line.text).join("\n").trim(),
+    locations: locationsForLines(lines),
+  }));
 }
 
 function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
@@ -63,35 +106,9 @@ function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
     current.lines.push(line);
   }
 
-  const nonEmpty = groups.filter((group) => group.lines.some((line) => line.text.trim()));
-  if (nonEmpty.length === 1) {
-    const words = nonEmpty[0]!.lines.flatMap((line) => line.text.split(/\s+/).filter(Boolean));
-    if (words.length > 350) {
-      const chunks: ContractClause[] = [];
-      let offset = 0;
-      for (let index = 0; offset < nonEmpty[0]!.lines.length; index += 1) {
-        const selected: LocatedLine[] = [];
-        let count = 0;
-        while (offset < nonEmpty[0]!.lines.length && count < 250) {
-          const line = nonEmpty[0]!.lines[offset++]!;
-          selected.push(line);
-          count += line.text.split(/\s+/).filter(Boolean).length;
-        }
-        chunks.push({
-          id: `C${String(index + 1).padStart(3, "0")}`,
-          text: selected.map((line) => line.text).join("\n").trim(),
-          locations: unionLocations(selected.map((line) => line.location)),
-        });
-      }
-      return chunks;
-    }
-  }
-
-  return nonEmpty.map((group) => ({
-    id: group.id,
-    text: group.lines.map((line) => line.text).join("\n").trim(),
-    locations: unionLocations(group.lines.map((line) => line.location)),
-  }));
+  return groups
+    .filter((group) => group.lines.some((line) => line.text.trim()))
+    .flatMap(chunkGroup);
 }
 
 function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
@@ -99,12 +116,16 @@ function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
   let current: { texts: string[]; locations: ClauseLocation[] } = { texts: [], locations: [] };
 
   function flush() {
-    const text = current.texts.join(" ").replace(/\s+/g, " ").trim();
-    if (text) lines.push({ text, location: unionLocations(current.locations)[0]! });
+    const text = current.texts.join(" ").replace(/\s+/gu, " ").trim();
+    if (text) lines.push({ text, locations: current.locations });
     current = { texts: [], locations: [] };
   }
 
   for (const item of items) {
+    if (!item.str.trim()) {
+      if (item.hasEOL) flush();
+      continue;
+    }
     const scaleY = item.transform[3] ?? item.height;
     const x = item.transform[4] ?? 0;
     const y = item.transform[5] ?? 0;
@@ -119,13 +140,42 @@ function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
   return lines;
 }
 
-async function runOcr(document: Awaited<ReturnType<typeof getDocument>["promise"]>) {
+export function locatedLinesFromOcrBlocks(
+  blocks: OcrBlock[],
+  page: number,
+  renderScale: number,
+  renderedHeight: number,
+) {
+  return blocks.flatMap((block) => block.paragraphs.flatMap((paragraph) =>
+    paragraph.lines.flatMap<LocatedLine>((line) => {
+      const words = line.words.filter((word) => word.text.trim());
+      if (!words.length) return [];
+      return [{
+        text: words.map((word) => word.text).join(" ").trim() || line.text.trim(),
+        locations: words.map((word) => ({
+          page,
+          bbox: [
+            word.bbox.x0 / renderScale,
+            (renderedHeight - word.bbox.y1) / renderScale,
+            Math.max(1, (word.bbox.x1 - word.bbox.x0) / renderScale),
+            Math.max(1, (word.bbox.y1 - word.bbox.y0) / renderScale),
+          ],
+        })),
+      }];
+    })));
+}
+
+async function runOcrPages(
+  document: Awaited<ReturnType<typeof getDocument>["promise"]>,
+  pageNumbers: number[],
+) {
   const worker = await createWorker(env.ocrLanguage);
   const lines: LocatedLine[] = [];
+  const renderScale = 2;
   try {
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    for (const pageNumber of pageNumbers) {
       const page = await document.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 2 });
+      const viewport = page.getViewport({ scale: renderScale });
       const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
       const context = canvas.getContext("2d");
       await page.render({
@@ -133,17 +183,20 @@ async function runOcr(document: Awaited<ReturnType<typeof getDocument>["promise"
         canvasContext: context as unknown as CanvasRenderingContext2D,
         viewport,
       }).promise;
-      const result = await worker.recognize(canvas.toBuffer("image/png"));
-      const text = result.data.text.replace(/\r/g, "").trim();
-      if (text) {
-        lines.push({
-          text,
-          location: {
-            page: pageNumber,
-            bbox: [0, 0, viewport.width / 2, viewport.height / 2],
-          },
-        });
+      const result = await worker.recognize(
+        canvas.toBuffer("image/png"),
+        {},
+        { text: true, blocks: true },
+      );
+      const blocks = result.data.blocks as OcrBlock[] | null;
+      if (!blocks?.length && result.data.text.trim()) {
+        throw new HttpError(
+          422,
+          "OCR_COORDINATES_NOT_FOUND",
+          `OCR found text on page ${pageNumber} but did not return word coordinates.`,
+        );
       }
+      lines.push(...locatedLinesFromOcrBlocks(blocks ?? [], pageNumber, renderScale, viewport.height));
     }
   } finally {
     await worker.terminate();
@@ -152,6 +205,7 @@ async function runOcr(document: Awaited<ReturnType<typeof getDocument>["promise"
 }
 
 export async function extractPdf(buffer: Buffer) {
+  const started = performance.now();
   let document: Awaited<ReturnType<typeof getDocument>["promise"]>;
   try {
     document = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true }).promise;
@@ -163,28 +217,42 @@ export async function extractPdf(buffer: Buffer) {
     throw new HttpError(422, "UNSUPPORTED_PAGE_COUNT", "A contract must contain between 1 and 100 pages.");
   }
 
-  const lines: LocatedLine[] = [];
+  const linesByPage = new Map<number, LocatedLine[]>();
+  const scannedPages: number[] = [];
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);
     const content = await page.getTextContent();
-    lines.push(...pageLines(content.items.filter((item) => "str" in item) as PdfTextItem[], pageNumber));
+    const lines = pageLines(content.items.filter((item) => "str" in item) as PdfTextItem[], pageNumber);
+    if (lines.map((line) => line.text).join(" ").trim().length < 30) scannedPages.push(pageNumber);
+    else linesByPage.set(pageNumber, lines);
   }
 
-  const isScanned = lines.map((line) => line.text).join(" ").trim().length < 30;
-  const extractedLines = isScanned ? await runOcr(document) : lines;
+  const ocrLines = scannedPages.length ? await runOcrPages(document, scannedPages) : [];
+  for (const pageNumber of scannedPages) {
+    linesByPage.set(pageNumber, ocrLines.filter((line) => line.locations[0]?.page === pageNumber));
+  }
+  const extractedLines = [...linesByPage.entries()]
+    .sort(([left], [right]) => left - right)
+    .flatMap(([, lines]) => lines);
   const clauses = clausesFromLines(extractedLines);
   if (!clauses.length) {
     throw new HttpError(422, "CONTRACT_TEXT_NOT_FOUND", "No readable contract text was found in the PDF.");
   }
 
-  return { clauses, isScanned, pageCount: document.numPages };
+  return {
+    clauses,
+    isScanned: scannedPages.length > 0,
+    scannedPages,
+    pageCount: document.numPages,
+    extractionMs: Math.round(performance.now() - started),
+  };
 }
 
 export function extractClausesFromPlainText(text: string): ContractClause[] {
   return clausesFromLines(
     text.split(/\r?\n/).filter((line) => line.trim()).map((line) => ({
       text: line,
-      location: { page: 1, bbox: [0, 0, 500, 12] },
+      locations: [{ page: 1, bbox: [0, 0, 500, 12] }],
     })),
   );
 }

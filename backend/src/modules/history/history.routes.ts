@@ -23,13 +23,15 @@ historyRouter.delete("/:id", async (request, response) => {
     throw new HttpError(404, "ANALYSIS_NOT_FOUND", "The analysis was not found.");
   }
   const contract = await store.getContract(analysis.contractId);
+  await store.deleteNegotiation(analysis.analysisId);
   await store.deleteAnalysis(analysis.analysisId);
-  await store.deleteContract(analysis.contractId);
+  const remainingAnalyses = await store.countAnalysesByContract(analysis.contractId);
+  if (remainingAnalyses === 0) await store.deleteContract(analysis.contractId);
   await Promise.all([
     analysis.markedPdf
       ? rm(path.join(env.markedPdfDirectory, analysis.markedPdf.storageKey), { force: true })
       : Promise.resolve(),
-    contract
+    contract && remainingAnalyses === 0
       ? rm(path.join(env.uploadDirectory, contract.storageKey), { force: true })
       : Promise.resolve(),
   ]);

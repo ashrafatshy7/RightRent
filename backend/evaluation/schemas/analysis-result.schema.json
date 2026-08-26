@@ -6,18 +6,26 @@
   "additionalProperties": false,
   "required": [
     "schemaVersion",
+    "analysisId",
     "contractId",
     "status",
     "summary",
     "findings",
+    "protectionReport",
     "missingProtections",
     "suggestedAdditions",
+    "preferencesSnapshot",
+    "analysisInputHash",
     "privacy",
+    "disclaimer",
+    "markedPdf",
+    "createdAt",
     "timingMs"
   ],
   "properties": {
     "schemaVersion": { "const": "1.0.0" },
     "analysisId": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
     "contractId": { "type": "string", "minLength": 1 },
     "status": { "const": "COMPLETED" },
     "summary": {
@@ -34,6 +42,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/finding" }
     },
+    "protectionReport": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/protection" }
+    },
     "missingProtections": {
       "type": "array",
       "items": { "$ref": "#/$defs/protection" }
@@ -42,13 +54,26 @@
       "type": "array",
       "items": { "$ref": "#/$defs/protection" }
     },
+    "preferencesSnapshot": { "$ref": "#/$defs/preferences" },
+    "analysisInputHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "privacy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["redactionCompleted", "redactedEntityCount"],
+      "required": ["redactionCompleted", "redactedEntityCount", "mode", "model"],
       "properties": {
         "redactionCompleted": { "type": "boolean" },
-        "redactedEntityCount": { "type": "integer", "minimum": 0 }
+        "redactedEntityCount": { "type": "integer", "minimum": 0 },
+        "mode": { "enum": ["REGEX_TEST_ONLY", "REGEX_AND_DICTABERT"] },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "disclaimer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["notLegalAdvice", "humanReviewRecommended"],
+      "properties": {
+        "notLegalAdvice": { "const": true },
+        "humanReviewRecommended": { "const": true }
       }
     },
     "markedPdf": {
@@ -67,13 +92,15 @@
     "timingMs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["total"],
+      "required": ["total", "target", "targetMet"],
       "properties": {
         "extraction": { "type": "integer", "minimum": 0 },
         "redaction": { "type": "integer", "minimum": 0 },
         "retrievalAndAnalysis": { "type": "integer", "minimum": 0 },
         "pdfGeneration": { "type": "integer", "minimum": 0 },
-        "total": { "type": "integer", "minimum": 0, "maximum": 90000 }
+        "total": { "type": "integer", "minimum": 0 },
+        "target": { "type": "integer", "minimum": 1 },
+        "targetMet": { "type": "boolean" }
       }
     }
   },
@@ -107,15 +134,7 @@
         },
         "legalReferences": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["lawReferenceId", "section"],
-            "properties": {
-              "lawReferenceId": { "type": "string", "minLength": 1 },
-              "section": { "type": ["string", "null"] }
-            }
-          }
+          "items": { "$ref": "#/$defs/legalReference" }
         },
         "locations": {
           "type": "array",
@@ -144,12 +163,55 @@
     "protection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["protectionId", "status", "explanation"],
+      "required": ["protectionId", "title", "status", "explanation", "relevantClauseIds", "legalReferences"],
       "properties": {
         "protectionId": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["MISSING", "PARTIAL"] },
+        "title": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["COVERED", "MISSING", "PARTIAL"] },
         "explanation": { "type": "string", "minLength": 1 },
+        "relevantClauseIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "legalReferences": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/legalReference" }
+        },
         "suggestedText": { "type": "string" }
+      }
+    },
+    "legalReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lawReferenceId", "lawName", "section", "sourceUrl", "revisionId"],
+      "properties": {
+        "lawReferenceId": { "type": "string", "minLength": 1 },
+        "lawName": { "type": "string", "minLength": 1 },
+        "section": { "type": ["string", "null"] },
+        "sourceUrl": { "type": "string", "format": "uri" },
+        "revisionId": { "type": ["integer", "null"] }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxMonthlyRentIls",
+        "repairUrgencyHours",
+        "leaseLengthMonths",
+        "maxAnnualRentIncreasePercent",
+        "petsRequired",
+        "furnishedRequired",
+        "acceptsGuarantorRequirement"
+      ],
+      "properties": {
+        "maxMonthlyRentIls": { "type": "number", "minimum": 0 },
+        "repairUrgencyHours": { "enum": [24, 48, 72, 168] },
+        "leaseLengthMonths": { "type": "integer", "minimum": 1 },
+        "maxAnnualRentIncreasePercent": { "type": "number", "minimum": 0 },
+        "petsRequired": { "type": "boolean" },
+        "furnishedRequired": { "type": "boolean" },
+        "acceptsGuarantorRequirement": { "type": "boolean" }
       }
     }
   }

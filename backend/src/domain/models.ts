@@ -49,6 +49,7 @@ export type ContractRecord = {
   storageKey: string;
   status: "UPLOADED" | "EXTRACTED" | "ANALYZED" | "FAILED";
   isScanned: boolean;
+  extractionMs: number;
   clauses: ContractClause[];
   uploadedAt: string;
   updatedAt: string;
@@ -60,20 +61,31 @@ export type LegalAssessment = {
   preferenceConflict: boolean;
 };
 
+export type LegalReference = {
+  lawReferenceId: string;
+  lawName: string;
+  section: string | null;
+  sourceUrl: string;
+  revisionId: number | null;
+};
+
 export type Finding = {
   clauseId: string;
   severity: Severity;
   title: string;
   explanation: string;
   legalAssessment: LegalAssessment;
-  legalReferences: Array<{ lawReferenceId: string; section: string | null }>;
+  legalReferences: LegalReference[];
   locations: ClauseLocation[];
 };
 
 export type Protection = {
   protectionId: string;
-  status: "MISSING" | "PARTIAL";
+  title: string;
+  status: "COVERED" | "PARTIAL" | "MISSING";
   explanation: string;
+  relevantClauseIds: string[];
+  legalReferences: LegalReference[];
   suggestedText?: string;
 };
 
@@ -84,9 +96,18 @@ export type AnalysisResult = {
   status: "COMPLETED";
   summary: { critical: number; warnings: number; compliant: number };
   findings: Finding[];
+  protectionReport: Protection[];
   missingProtections: Protection[];
   suggestedAdditions: Protection[];
-  privacy: { redactionCompleted: boolean; redactedEntityCount: number };
+  preferencesSnapshot: TenantPreferences;
+  analysisInputHash: string;
+  privacy: {
+    redactionCompleted: boolean;
+    redactedEntityCount: number;
+    mode: "REGEX_TEST_ONLY" | "REGEX_AND_DICTABERT";
+    model: string | null;
+  };
+  disclaimer: { notLegalAdvice: true; humanReviewRecommended: true };
   markedPdf: { storageKey: string } | null;
   timingMs: {
     extraction: number;
@@ -94,6 +115,8 @@ export type AnalysisResult = {
     retrievalAndAnalysis: number;
     pdfGeneration: number;
     total: number;
+    target: number;
+    targetMet: boolean;
   };
 };
 
@@ -120,22 +143,101 @@ export type NegotiationRecord = {
 
 export type LawChunk = {
   id: string;
+  israelLawId: number;
+  lawName: string;
   section: string | null;
-  topic: string;
-  kind: "statutory_rule" | "recommended_contract_protection";
+  kind: "statutory_rule";
   text: string;
   sourceUrl: string;
   contentHash: string;
-  updatedAt: string;
-  embedding?: number[];
+  revisionId: number;
+  sourceAsOf: string;
 };
+
+export type LawEmbeddingStatus = "CANDIDATE" | "ACTIVE" | "RETIRED";
+
+export type LawEmbeddingRecord = {
+  id: string;
+  referenceId: string;
+  israelLawId: number;
+  lawName: string;
+  section: string | null;
+  sourceOrdinal: number;
+  sourceUrl: string;
+  wikisourceTitle: string;
+  revisionId: number;
+  revisionTimestamp: string;
+  sourceAsOf: string;
+  officialFingerprint: string;
+  latestOfficialPublicationDate: string;
+  contentHash: string;
+  status: LawEmbeddingStatus;
+  createdAt: string;
+  embedding: number[];
+};
+
+export type LawSourceStatus =
+  | "ACTIVE"
+  | "AWAITING_VERIFICATION"
+  | "OFFICIAL_UPDATE_PENDING"
+  | "WIKISOURCE_CHANGED"
+  | "FAILED";
+
+export type LawSourceState = {
+  israelLawId: number;
+  lawName: string;
+  knessetUrl: string;
+  wikisourceTitle: string;
+  wikisourceUrl: string;
+  status: LawSourceStatus;
+  latestOfficialPublicationDate: string;
+  observedOfficialFingerprint: string;
+  observedBindingIds: number[];
+  observedAmendingLawIds: number[];
+  observedRevisionId: number;
+  observedRevisionTimestamp: string;
+  observedContentHash: string;
+  observedSectionCount: number;
+  observedSectionsHash: string;
+  observedSectionKeys: string[];
+  activeOfficialFingerprint: string | null;
+  activeRevisionId: number | null;
+  activeSourceAsOf: string | null;
+  activeContentHash: string | null;
+  activeSectionCount: number | null;
+  activeSectionsHash: string | null;
+  activeSectionKeys: string[];
+  candidateOfficialFingerprint: string | null;
+  candidateRevisionId: number | null;
+  candidateSourceAsOf: string | null;
+  candidateContentHash: string | null;
+  candidateSectionCount: number | null;
+  candidateSectionsHash: string | null;
+  candidateSectionKeys: string[];
+  checkedAt: string;
+  verifiedAt: string | null;
+  verifiedBy: string | null;
+  verificationReference: string | null;
+  error: string | null;
+};
+
+export type LawSyncStatus =
+  | "UNCHANGED"
+  | "CANDIDATE_STAGED"
+  | "OFFICIAL_UPDATE_PENDING"
+  | "WIKISOURCE_CHANGED"
+  | "FAILED";
 
 export type LawSyncRecord = {
   id: string;
-  sourceUrl: string;
-  status: "COMPLETED" | "FAILED";
+  israelLawId: number;
+  status: LawSyncStatus;
   sectionCount: number;
-  contentHash: string;
-  syncedAt: string;
-  error?: string;
+  officialFingerprint: string;
+  wikisourceRevisionId: number | null;
+  contentHash: string | null;
+  sectionsHash: string | null;
+  checkedAt: string;
+  expiresAt: Date;
+  error: string | null;
 };

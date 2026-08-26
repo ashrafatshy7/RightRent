@@ -1,80 +1,78 @@
 {
   "schemaVersion": "1.0.0",
-  "corpusVersion": "engineering-seed-2026-08-24",
+  "corpusVersion": "engineering-reference-ids-2026-08-25",
   "language": "he",
   "jurisdiction": "IL",
   "document": {
-    "titleHe": "חוק השכירות והשאילה, התשל״א-1971",
-    "titleEn": "Rental and Lending Law, 5731-1971",
     "officialSourceUrl": "https://main.knesset.gov.il/apps/legislation/main/laws/2000596",
-    "sourceCheckedAt": "2026-08-24",
-    "latestAmendmentReportedBySource": "2026-03-31",
-    "textStatus": "ENGINEERING_SUMMARY_NOT_AUTHORITATIVE"
+    "textStatus": "NO_STATUTORY_TEXT_STORED"
   },
   "sections": [
     {
       "id": "IL-RLL-25Y-SECURITY-CAP",
       "section": "25י",
       "topic": "security_cap",
-      "kind": "statutory_rule",
-      "summaryHe": "כאשר ערובה להבטחת חיובי השוכר כרוכה בהוצאה כספית לשוכר, סכומה המצטבר מוגבל לנמוך מבין שליש מדמי השכירות לכל תקופת השכירות ושלושה חודשי שכירות.",
-      "summaryEn": "A tenant-funded security is capped at the lower of one third of the rent for the full lease term and three months' rent.",
-      "evaluation": {
-        "calculation": "min(totalRent / 3, monthlyRent * 3)",
-        "violationSeverity": "RED"
-      },
-      "requiresAuthoritativeTextBeforeProduction": true
+      "kind": "statutory_rule"
     },
     {
       "id": "IL-RLL-25Z-REPAIRS",
       "section": "25ז",
       "topic": "landlord_repairs",
-      "kind": "statutory_rule",
-      "summaryHe": "השוכר אחראי לליקוי שנגרם עקב שימוש בלתי סביר; המשכיר אחראי לליקוי אחר שאינו קל ערך ושאינו באחריות השוכר, בהתאם למועדים ולהוראות הדין, ובכלל זה טיפול מהיר יותר בליקוי דחוף.",
-      "summaryEn": "The tenant is responsible for damage caused by unreasonable use; the landlord is responsible for other qualifying defects under the statutory time limits, including faster treatment for urgent defects.",
-      "evaluation": {
-        "urgentRepairMaximumDays": 3,
-        "violationSeverity": "RED"
-      },
-      "requiresAuthoritativeTextBeforeProduction": true
+      "kind": "statutory_rule"
     },
     {
       "id": "IL-RLL-25F-HABITABILITY",
       "section": "25ו",
       "topic": "minimum_habitability",
-      "kind": "statutory_rule",
-      "summaryHe": "דירה למגורים חייבת לעמוד בתנאי מינימום של ראויות למגורים, לרבות מערכות בסיסיות ותנאי בטיחות שנקבעו בחוק.",
-      "summaryEn": "A residential rental must satisfy the law's minimum habitability and safety conditions.",
-      "evaluation": {
-        "violationSeverity": "RED"
-      },
-      "requiresAuthoritativeTextBeforeProduction": true
+      "kind": "statutory_rule"
     },
     {
       "id": "RR-REC-EARLY-TERMINATION",
       "section": null,
       "topic": "early_termination",
-      "kind": "recommended_contract_protection",
-      "summaryHe": "מומלץ שהחוזה יגדיר מנגנון ברור לסיום מוקדם או למציאת שוכר חלופי.",
-      "summaryEn": "The agreement should preferably define a clear early-termination or replacement-tenant mechanism.",
-      "evaluation": {
-        "omissionSeverity": "SUGGESTION",
-        "omissionIsLegalViolation": false
-      },
-      "requiresAuthoritativeTextBeforeProduction": false
+      "kind": "recommended_contract_protection"
     },
     {
       "id": "RR-REC-WEAR-AND-TEAR",
       "section": "25ז",
       "topic": "ordinary_wear_and_tear",
-      "kind": "recommended_contract_protection",
-      "summaryHe": "מומלץ לנסח במפורש שהשוכר אינו נושא בעלות של בלאי סביר או ליקוי שלא נגרם משימוש בלתי סביר שלו.",
-      "summaryEn": "The agreement should preferably state that the tenant is not responsible for ordinary wear or defects not caused by the tenant's unreasonable use.",
-      "evaluation": {
-        "omissionSeverity": "SUGGESTION",
-        "omissionIsLegalViolation": false
-      },
-      "requiresAuthoritativeTextBeforeProduction": true
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-REPAIR-TIMELINE",
+      "section": "25ז",
+      "topic": "repair_timeline",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-SECURITY-RETURN",
+      "section": "25י",
+      "topic": "security_return",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-ENTRY-NOTICE",
+      "section": null,
+      "topic": "landlord_entry_notice",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-CHARGES-ALLOCATION",
+      "section": "25ט",
+      "topic": "charges_allocation",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-HANDOVER-CONDITION",
+      "section": null,
+      "topic": "handover_condition",
+      "kind": "recommended_contract_protection"
+    },
+    {
+      "id": "RR-REC-RENEWAL-TERMS",
+      "section": null,
+      "topic": "renewal_terms",
+      "kind": "recommended_contract_protection"
     }
   ]
 }

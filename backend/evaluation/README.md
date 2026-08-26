@@ -1,8 +1,7 @@
 # RightRent Evaluation Foundation
 
-This directory is the executable specification for RightRent's future backend. It defines
-what a correct contract analysis must return before the Express API, MongoDB persistence,
-or React client are implemented.
+This directory contains the executable specification and release-evidence format for the
+RightRent backend.
 
 Only synthetic or fully anonymized contracts may be committed here. Never add a real
 contract containing names, identity numbers, phone numbers, signatures, or addresses.
@@ -79,16 +78,32 @@ Run the dependency-free integrity check from the repository root:
 node evaluation/validate.mjs
 ```
 
-This validates JSON syntax, fixture paths, clause IDs, profile references, law references,
-classification invariants, missing-protection references, and privacy test values. Full JSON
-Schema validation should be added to the backend test runner when its dependencies are
-installed.
+This validates JSON syntax and JSON Schemas, fixture paths, clause IDs, profile references, law
+references, classification invariants, missing-protection references, and privacy test values.
+The API test also validates a real analysis response against `analysis-result.schema.json`.
+
+## Production release gate
+
+The four synthetic cases remain fast CI fixtures; they do not satisfy the Project Book's legal
+evaluation target. Add 10–20 lawyer-reviewed, anonymized cases to the annotations and capture each
+live run as `evaluation/results/<case-id>.json` with this shape:
+
+```json
+{
+  "caseId": "RR-EVAL-001",
+  "modelBoundText": "the exact locally redacted payload sent to the model",
+  "analysis": {}
+}
+```
+
+Run `npm run evaluation:release`. It fails below the required dataset size, recall, precision,
+missing-protection recall, privacy, or timing thresholds. Never commit the `results` directory.
 
 ## Legal-source policy
 
-`law/fair-rental-law-sections.json` contains engineering summaries, not authoritative
-statutory text and not legal advice. The production RAG corpus must be generated from a
-verified, current consolidated version of the law.
+`law/fair-rental-law-sections.json` contains test reference IDs only. It intentionally contains
+no statutory text or summaries. The production RAG corpus is generated from a reviewed, current
+consolidated version and persists embeddings rather than the source text.
 
 The official source of record is the Knesset National Legislation Database:
 
