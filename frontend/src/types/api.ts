@@ -37,12 +37,41 @@ export type UploadedContract = {
 export type Severity = "RED" | "ORANGE" | "OK";
 export type ProtectionStatus = "COVERED" | "PARTIAL" | "MISSING";
 
+// Internal reason bucket behind a severity - RED/ORANGE/OK stay the only tenant-facing labels.
+export type FindingCategory = "legal_compliance" | "contractual_risk" | "tenant_preference" | "informational";
+export type ConfidenceLevel = "high" | "medium" | "low";
+export type FindingTopic =
+  | "rent_and_term"
+  | "guarantee_security"
+  | "entry_privacy"
+  | "repairs_maintenance"
+  | "charges_payments"
+  | "termination_renewal"
+  | "waiver_liability"
+  | "pets_and_use"
+  | "handover_condition"
+  | "other";
+
+export type DeterministicCheck = {
+  ruleId: string;
+  label: string;
+  legalReferenceId: string;
+  contractValue: number;
+  legalLimit: number;
+  calculatedLimit: number;
+  difference: number;
+  unit: "ILS" | "days";
+  passesRule: boolean;
+};
+
 export type LegalReference = {
   lawReferenceId: string;
   lawName: string;
   section: string | null;
   sourceUrl: string;
   revisionId: number | null;
+  excerpt: string | null;
+  sourceAsOf: string | null;
 };
 
 export type ClauseLocation = { page: number; bbox: [number, number, number, number] };
@@ -50,7 +79,15 @@ export type ClauseLocation = { page: number; bbox: [number, number, number, numb
 export type Finding = {
   clauseId: string;
   severity: Severity;
+  category: FindingCategory;
+  topic: FindingTopic;
+  confidence: ConfidenceLevel;
   title: string;
+  clauseQuote: string;
+  plainLanguageExplanation: string;
+  whyItMatters: string;
+  recommendedAction?: string;
+  suggestedReplacementText?: string;
   explanation: string;
   legalAssessment: {
     violatesLaw: boolean;
@@ -58,6 +95,8 @@ export type Finding = {
     preferenceConflict: boolean;
   };
   legalReferences: LegalReference[];
+  deterministicChecks?: DeterministicCheck[];
+  relatedFindingIds: string[];
   locations: ClauseLocation[];
 };
 
@@ -72,12 +111,14 @@ export type Protection = {
 };
 
 export type Analysis = {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.1.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";
   createdAt: string;
   summary: { critical: number; warnings: number; compliant: number };
+  headline: string;
+  keyFindingIds: string[];
   findings: Finding[];
   protectionReport: Protection[];
   missingProtections: Protection[];

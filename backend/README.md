@@ -167,10 +167,18 @@ applies the deterministic rule `violation -> RED`, `risk/preference conflict -> 
 `OK`. A claimed violation without a retrieved legal reference is rejected instead of being shown
 to the tenant.
 
-After clause analysis, a separate contract-level Claude request evaluates every predefined
-protection as `COVERED`, `PARTIAL`, or `MISSING`, maps it to clause IDs, and suggests text for
-incomplete protections. RAG analysis is disabled unless all 13 monitored laws have approved
-`ACTIVE` versions.
+In parallel with clause analysis, a separate contract-level Claude request evaluates every
+predefined protection as `COVERED`, `PARTIAL`, or `MISSING`, maps it to clause IDs, and suggests
+text for incomplete protections. RAG analysis is disabled unless all 13 monitored laws have
+approved `ACTIVE` versions.
+
+Claude calls use `ANTHROPIC_MODEL` (default `claude-sonnet-5`) with adaptive thinking and a
+per-call effort level, and always stream: a call fails only when its stream stays silent for 60
+seconds. Rate limits, overload, and connection failures are retried; timeouts and broken streams
+are not, because the partial response is already billed. Each clause verdict and protection report
+is saved in `ai_result_cache` for seven days, keyed by a hash of the tenant, preferences, active law
+versions, redacted input, and request configuration, so retrying a failed analysis pays only for
+the calls that did not finish.
 
 Text PDFs are extracted with `pdfjs-dist`, preserving text-item coordinates. Every scanned page,
 including a scanned page inside a mixed PDF, is rendered with `@napi-rs/canvas`; Tesseract.js word

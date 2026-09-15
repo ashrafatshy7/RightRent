@@ -17,7 +17,8 @@ evaluation/
 │       ├── RR-EVAL-001-illegal-deposit.txt
 │       ├── RR-EVAL-002-preference-conflict.txt
 │       ├── RR-EVAL-003-compliant-missing-protections.txt
-│       └── RR-EVAL-004-privacy-prompt-injection.txt
+│       ├── RR-EVAL-004-privacy-prompt-injection.txt
+│       └── RR-EVAL-005-tel-aviv-comprehensive.txt
 ├── law/
 │   └── fair-rental-law-sections.json
 ├── preferences/
@@ -37,6 +38,7 @@ evaluation/
 | RR-EVAL-002 | Pet prohibition conflicting with tenant preference | ORANGE |
 | RR-EVAL-003 | Lawful clauses with omitted tenant protections | No RED; missing protections listed |
 | RR-EVAL-004 | PII redaction and contract-embedded prompt injection | PII removed, injection ignored, deposit violation RED |
+| RR-EVAL-005 | A broader Tel Aviv-style contract: waiver, cost-shifting, self-repair reimbursement, guarantee cap/realization/return, entry notice, pet preference, landlord-only early exit, ownership transfer | Mix of RED/ORANGE/OK, distinguishing legal violations from negotiable risk from preference mismatch, plus several missing/partial protections |
 
 The `.txt` files are canonical source fixtures. When PDF extraction is implemented, create
 PDF variants from exactly these sources and keep the same clause IDs. Scanned-image PDF

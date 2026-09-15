@@ -10,6 +10,8 @@
     "contractId",
     "status",
     "summary",
+    "headline",
+    "keyFindingIds",
     "findings",
     "protectionReport",
     "missingProtections",
@@ -23,7 +25,7 @@
     "timingMs"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "1.1.0" },
     "analysisId": { "type": "string", "minLength": 1 },
     "createdAt": { "type": "string", "format": "date-time" },
     "contractId": { "type": "string", "minLength": 1 },
@@ -37,6 +39,11 @@
         "warnings": { "type": "integer", "minimum": 0 },
         "compliant": { "type": "integer", "minimum": 0 }
       }
+    },
+    "headline": { "type": "string", "minLength": 1 },
+    "keyFindingIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
     },
     "findings": {
       "type": "array",
@@ -111,16 +118,46 @@
       "required": [
         "clauseId",
         "severity",
+        "category",
+        "topic",
+        "confidence",
         "title",
+        "clauseQuote",
+        "plainLanguageExplanation",
+        "whyItMatters",
         "explanation",
         "legalAssessment",
         "legalReferences",
+        "relatedFindingIds",
         "locations"
       ],
       "properties": {
         "clauseId": { "type": "string", "minLength": 1 },
         "severity": { "enum": ["RED", "ORANGE", "OK"] },
+        "category": {
+          "enum": ["legal_compliance", "contractual_risk", "tenant_preference", "informational"]
+        },
+        "topic": {
+          "enum": [
+            "rent_and_term",
+            "guarantee_security",
+            "entry_privacy",
+            "repairs_maintenance",
+            "charges_payments",
+            "termination_renewal",
+            "waiver_liability",
+            "pets_and_use",
+            "handover_condition",
+            "other"
+          ]
+        },
+        "confidence": { "enum": ["high", "medium", "low"] },
         "title": { "type": "string", "minLength": 1 },
+        "clauseQuote": { "type": "string", "minLength": 1 },
+        "plainLanguageExplanation": { "type": "string", "minLength": 1 },
+        "whyItMatters": { "type": "string", "minLength": 1 },
+        "recommendedAction": { "type": "string", "minLength": 1 },
+        "suggestedReplacementText": { "type": "string", "minLength": 1 },
         "explanation": { "type": "string", "minLength": 1 },
         "legalAssessment": {
           "type": "object",
@@ -135,6 +172,14 @@
         "legalReferences": {
           "type": "array",
           "items": { "$ref": "#/$defs/legalReference" }
+        },
+        "deterministicChecks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deterministicCheck" }
+        },
+        "relatedFindingIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "locations": {
           "type": "array",
@@ -183,13 +228,41 @@
     "legalReference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lawReferenceId", "lawName", "section", "sourceUrl", "revisionId"],
+      "required": ["lawReferenceId", "lawName", "section", "sourceUrl", "revisionId", "excerpt", "sourceAsOf"],
       "properties": {
         "lawReferenceId": { "type": "string", "minLength": 1 },
         "lawName": { "type": "string", "minLength": 1 },
         "section": { "type": ["string", "null"] },
         "sourceUrl": { "type": "string", "format": "uri" },
-        "revisionId": { "type": ["integer", "null"] }
+        "revisionId": { "type": ["integer", "null"] },
+        "excerpt": { "type": ["string", "null"] },
+        "sourceAsOf": { "type": ["string", "null"] }
+      }
+    },
+    "deterministicCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ruleId",
+        "label",
+        "legalReferenceId",
+        "contractValue",
+        "legalLimit",
+        "calculatedLimit",
+        "difference",
+        "unit",
+        "passesRule"
+      ],
+      "properties": {
+        "ruleId": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "legalReferenceId": { "type": "string", "minLength": 1 },
+        "contractValue": { "type": "number" },
+        "legalLimit": { "type": "number" },
+        "calculatedLimit": { "type": "number" },
+        "difference": { "type": "number" },
+        "unit": { "enum": ["ILS", "days"] },
+        "passesRule": { "type": "boolean" }
       }
     },
     "preferences": {

@@ -50,6 +50,23 @@
               "properties": {
                 "clauseId": { "type": "string", "pattern": "^C[0-9]{3}$" },
                 "severity": { "enum": ["RED", "ORANGE", "OK"] },
+                "category": {
+                  "enum": ["legal_compliance", "contractual_risk", "tenant_preference", "informational"]
+                },
+                "topic": {
+                  "enum": [
+                    "rent_and_term",
+                    "guarantee_security",
+                    "entry_privacy",
+                    "repairs_maintenance",
+                    "charges_payments",
+                    "termination_renewal",
+                    "waiver_liability",
+                    "pets_and_use",
+                    "handover_condition",
+                    "other"
+                  ]
+                },
                 "legalAssessment": {
                   "type": "object",
                   "additionalProperties": false,

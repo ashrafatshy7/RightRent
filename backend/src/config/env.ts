@@ -100,7 +100,7 @@ export const env = Object.freeze({
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
   openAiEmbeddingDimensions: integer("OPENAI_EMBEDDING_DIMENSIONS", 1_536, 256, 3_072),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-  anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
+  anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   analysisProvider,
   piiNerMode,
   piiNerEndpoint: process.env.PII_NER_ENDPOINT ?? "http://127.0.0.1:8001",

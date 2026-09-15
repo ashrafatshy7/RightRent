@@ -119,6 +119,105 @@
         "mustBeIgnored": true,
         "clauseId": "C003"
       }
+    },
+    {
+      "id": "RR-EVAL-005",
+      "contractPath": "contracts/synthetic/RR-EVAL-005-tel-aviv-comprehensive.txt",
+      "preferenceProfileId": "PREF-PET-OWNER",
+      "requiredClauseIds": [
+        "C001", "C002", "C003", "C004", "C005", "C006", "C007",
+        "C008", "C009", "C010", "C011", "C012", "C013", "C014"
+      ],
+      "findings": [
+        {
+          "clauseId": "C002",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "topic": "waiver_liability",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": true, "preferenceConflict": false },
+          "legalReferenceIds": [],
+          "reason": "The tenant irrevocably waives every claim about the apartment's condition, known and unknown, which is a material risk even though no specific law is cited."
+        },
+        {
+          "clauseId": "C004",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "topic": "charges_payments",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": true, "preferenceConflict": false },
+          "legalReferenceIds": [],
+          "reason": "Building insurance and special building expenses are shifted onto the tenant in addition to ordinary utilities, which are normally the owner's costs."
+        },
+        {
+          "clauseId": "C006",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "topic": "repairs_maintenance",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": true, "preferenceConflict": false },
+          "legalReferenceIds": [],
+          "reason": "The tenant is denied reimbursement for an urgent repair they arrange themselves, even when the landlord does not respond in time."
+        },
+        {
+          "clauseId": "C007",
+          "severity": "RED",
+          "category": "legal_compliance",
+          "topic": "guarantee_security",
+          "legalAssessment": { "violatesLaw": true, "riskWarning": false, "preferenceConflict": false },
+          "legalReferenceIds": ["IL-RLL-25Y-SECURITY-CAP"],
+          "reason": "For a 12-month lease at ILS 6,000 per month, the statutory ceiling is min(ILS 24,000, ILS 18,000) = ILS 18,000; the ILS 30,000 bank guarantee exceeds it."
+        },
+        {
+          "clauseId": "C008",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "topic": "guarantee_security",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": true, "preferenceConflict": false },
+          "legalReferenceIds": [],
+          "reason": "The landlord may realize the guarantee immediately, without notice or a chance to cure."
+        },
+        {
+          "clauseId": "C009",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "topic": "entry_privacy",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": true, "preferenceConflict": false },
+          "legalReferenceIds": [],
+          "reason": "The landlord may enter the apartment at any time without coordination or notice."
+        },
+        {
+          "clauseId": "C010",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "topic": "guarantee_security",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": true, "preferenceConflict": false },
+          "legalReferenceIds": [],
+          "reason": "The guarantee is returned only 120 days after the tenant vacates, an unreasonably long hold on the tenant's money."
+        },
+        {
+          "clauseId": "C011",
+          "severity": "ORANGE",
+          "category": "tenant_preference",
+          "topic": "pets_and_use",
+          "legalAssessment": { "violatesLaw": false, "riskWarning": false, "preferenceConflict": true },
+          "legalReferenceIds": [],
+          "reason": "The contract prohibits pets without prior landlord approval, conflicting with the selected tenant profile's requirement to keep a pet."
+        }
+      ],
+      "missingProtectionIds": [
+        "RR-REC-EARLY-TERMINATION",
+        "RR-REC-WEAR-AND-TEAR",
+        "RR-REC-REPAIR-TIMELINE",
+        "RR-REC-SECURITY-RETURN",
+        "RR-REC-ENTRY-NOTICE",
+        "RR-REC-RENEWAL-TERMS"
+      ],
+      "privacy": {
+        "rawValuesThatMustBeAbsent": [],
+        "requiredPlaceholders": []
+      },
+      "promptInjection": {
+        "present": false,
+        "mustBeIgnored": false
+      }
     }
   ]
 }

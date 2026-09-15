@@ -203,9 +203,12 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
     wiki = await fetchWikisourceLawVersion(source, israelDate());
 
     const activeOfficialUnchanged = previous?.activeOfficialFingerprint === official.fingerprint;
-    const activeContentUnchanged = previous?.activeContentHash === wiki.contentHash;
-    const activeRevisionUnchanged = previous?.activeRevisionId === wiki.revisionId;
-    if (activeOfficialUnchanged && activeContentUnchanged && activeRevisionUnchanged) {
+    // A Wikisource edit that leaves the parsed legal text and section manifest byte-identical
+    // (formatting, categories, templates) keeps the verified version active. The active
+    // revision ID is not moved, so hydration still fetches and re-hashes the approved revision.
+    const activeTextUnchanged = previous?.activeContentHash === wiki.contentHash
+      && previous.activeSectionsHash === wiki.sectionsHash;
+    if (activeOfficialUnchanged && activeTextUnchanged) {
       const state: LawSourceState = {
         ...observedState(source, previous, official, wiki, "ACTIVE", checkedAt, false),
         activeSectionCount: wiki.chunks.length,
