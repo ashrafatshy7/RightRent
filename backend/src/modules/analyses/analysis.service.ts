@@ -33,6 +33,7 @@ import {
   DETERMINISTIC_RULE_LAW_INFO,
   deterministicVerdict,
 } from "./deterministic-analysis.service.js";
+import { fixtureProtectionReport, fixtureVerdict, matchesFixtureContract } from "./fixture-analysis.service.js";
 import { retrieveLawCorpus } from "./law-corpus.service.js";
 import { createMarkedPdf } from "./marked-pdf.service.js";
 import { MONITORED_LAW_SOURCES } from "../law/law-source.catalog.js";
@@ -150,9 +151,18 @@ async function providerVerdict(
   fullText: string,
   store: DataStore,
   scope: AiResultScope,
+  useFixture: boolean,
 ): Promise<{ verdict: ProviderVerdict; references: RetrievedReference[]; reused: boolean; checks: DeterministicCheck[] }> {
   const checks = computeDeterministicChecks(clause, fullText, scope.preferences);
   if (env.analysisProvider !== "anthropic") {
+    // Replays the real Claude output captured once for the known fixture contract (see
+    // fixture-analysis.service.ts) instead of spending a live call - useful for frontend work
+    // without a per-request bill. Anything that isn't that exact contract, or a clause the capture
+    // didn't cover, falls back to the free deterministic heuristic below.
+    if (useFixture) {
+      const entry = fixtureVerdict(clause.id);
+      if (entry) return { verdict: entry.verdict, references: entry.references, reused: true, checks };
+    }
     const verdict = deterministicVerdict(clause, fullText, scope.preferences);
     return {
       verdict,
@@ -281,8 +291,10 @@ async function protectionReport(
   clauses: ContractClause[],
   store: DataStore,
   scope: AiResultScope,
+  useFixture: boolean,
 ): Promise<{ protections: Protection[]; reused: boolean }> {
   if (env.analysisProvider !== "anthropic") {
+    if (useFixture) return { protections: fixtureProtectionReport(), reused: true };
     return { protections: evaluateProtectionChecklistDeterministically(clauses), reused: false };
   }
   const key = sha256({
@@ -357,9 +369,12 @@ export async function analyzeContract(
   if (!contract || contract.userId !== userId) {
     throw new HttpError(404, "CONTRACT_NOT_FOUND", "The contract was not found.");
   }
+  const useFixture = env.analysisProvider === "fixture" && matchesFixtureContract(contract);
   const providerLabel = env.analysisProvider === "anthropic"
     ? `anthropic (${env.anthropicModel})`
-    : "deterministic";
+    : env.analysisProvider === "fixture"
+      ? useFixture ? "fixture (replaying captured Claude output)" : "fixture (no match, using deterministic heuristic)"
+      : "deterministic";
   traceAnalysis(`Starting contract ${contractId}: ${contract.clauses.length} clauses, provider ${providerLabel}.`);
   if (env.analysisProvider === "anthropic") {
     const activeIds = new Set(
@@ -419,7 +434,7 @@ export async function analyzeContract(
     let completedClauses = 0;
     const verdictsPromise = mapWithConcurrency(analyzableClauses, 3, async (clause) => {
       const clauseStarted = performance.now();
-      const result = await providerVerdict(clause, fullText, store, scope);
+      const result = await providerVerdict(clause, fullText, store, scope, useFixture);
       completedClauses += 1;
       const { legalAssessment, legalReferenceIds, title, usage } = result.verdict;
       const cited = legalReferenceIds
@@ -440,7 +455,7 @@ export async function analyzeContract(
     });
     const protectionsPromise = (async () => {
       const protectionsStarted = performance.now();
-      const { protections, reused } = await protectionReport(redaction.clauses, store, scope);
+      const { protections, reused } = await protectionReport(redaction.clauses, store, scope, useFixture);
       for (const protection of protections) {
         traceAnalysis(`  ${protection.protectionId} -> ${protection.status}${protection.relevantClauseIds.length ? ` (clauses ${protection.relevantClauseIds.join(", ")})` : ""}`);
       }

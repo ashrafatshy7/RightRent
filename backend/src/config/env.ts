@@ -39,7 +39,7 @@ const dataDriver = choice(
 const analysisProvider = choice(
   "ANALYSIS_PROVIDER",
   process.env.ANALYSIS_PROVIDER ?? "deterministic",
-  ["deterministic", "anthropic"] as const,
+  ["deterministic", "anthropic", "fixture"] as const,
 );
 const piiNerMode = choice(
   "PII_NER_MODE",
