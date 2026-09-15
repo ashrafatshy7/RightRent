@@ -87,4 +87,52 @@ test("Anthropic analysis requests constrain verdicts and protection reports to J
     assert.equal(outputConfig.format.schema?.type, "object");
     assert.equal(outputConfig.format.schema?.additionalProperties, false);
   }
+
+  const verdictSystem = String(requests[0]!.system);
+  assert.match(verdictSystem, /clear, fluent Hebrew/u);
+  assert.match(verdictSystem, /violatesLaw=true only when the supplied LAW_CONTEXT directly establishes a contradiction/u);
+  assert.match(verdictSystem, /Treat missing or ambiguous facts as unknown/u);
+
+  const protectionSystem = String(requests[1]!.system);
+  assert.match(protectionSystem, /clear, fluent Hebrew/u);
+  assert.match(protectionSystem, /Use COVERED only when the contract expressly provides the complete protection/u);
+  assert.match(protectionSystem, /do not infer coverage from silence/u);
+});
+
+test("Anthropic analysis rejects user-facing text that is not in Hebrew", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    content: [{
+      type: "text",
+      text: JSON.stringify({
+        title: "Risk warning",
+        explanation: "This clause creates a material contractual risk.",
+        legalAssessment: {
+          violatesLaw: false,
+          riskWarning: true,
+          preferenceConflict: false,
+        },
+        legalReferenceIds: [],
+      }),
+    }],
+    stop_reason: "end_turn",
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+  await assert.rejects(
+    analyzeWithClaude(clause, [lawSection], {
+      maxMonthlyRentIls: 7_000,
+      repairUrgencyHours: 72,
+      leaseLengthMonths: 12,
+      maxAnnualRentIncreasePercent: 5,
+      petsRequired: false,
+      furnishedRequired: false,
+      acceptsGuarantorRequirement: true,
+    }),
+    (error: unknown) => error instanceof Error
+      && "code" in error
+      && error.code === "INVALID_ANALYSIS_RESPONSE",
+  );
 });
