@@ -41,10 +41,15 @@ export async function hydrateLawEmbeddings(records: LawEmbeddingRecord[]): Promi
   }));
 
   return records.map<LawChunk>((record) => {
-    const sourceChunk = versions.get(versionKey(record))?.chunks[record.sourceOrdinal];
-    if (!sourceChunk
-      || sourceChunk.referenceId !== record.referenceId
-      || sourceChunk.contentHash !== record.contentHash) {
+    const chunks = versions.get(versionKey(record))?.chunks ?? [];
+    const ordinalChunk = chunks[record.sourceOrdinal];
+    const matches = ordinalChunk?.contentHash === record.contentHash
+      && ordinalChunk.section === record.section
+      ? [ordinalChunk]
+      : chunks.filter((chunk) =>
+        chunk.contentHash === record.contentHash && chunk.section === record.section);
+    const sourceChunk = matches.length === 1 ? matches[0] : undefined;
+    if (!sourceChunk) {
       throw new HttpError(
         503,
         "LAW_SOURCE_INTEGRITY_FAILED",

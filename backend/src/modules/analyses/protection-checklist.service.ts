@@ -16,8 +16,11 @@ export const PROTECTION_CHECKLIST: readonly ProtectionChecklistItem[] = [
     title: "סיום מוקדם ושוכר חלופי",
     description: "מנגנון סביר לסיום מוקדם או להצעת שוכר חלופי ללא סירוב בלתי סביר.",
     suggestedText: "השוכר יהיה רשאי לסיים את השכירות מוקדם בהודעה מראש או להציע שוכר חלופי סביר, והמשכיר לא יסרב מטעמים בלתי סבירים.",
-    covered: /(?:סיום|ביטול)\s+מוקדם|שוכר\s+חלופי|העברת\s+השכירות/u,
-    partial: /הודעה\s+מוקדמת|המחאת\s+זכויות/u,
+    // Requires the tenant's own right, not just any early-termination language: a clause that gives
+    // only the landlord an early-exit right must not read as COVERED just because it mentions
+    // "early termination" - it belongs in `partial` (topic addressed, protection incomplete).
+    covered: /השוכר[^.\n]{0,60}(?:סיום|ביטול)\s+מוקדם|(?:סיום|ביטול)\s+מוקדם[^.\n]{0,60}השוכר|שוכר\s+חלופי|העברת\s+השכירות/u,
+    partial: /(?:סיום|ביטול)\s+מוקדם|הודעה\s+מוקדמת|המחאת\s+זכויות/u,
   },
   {
     protectionId: "RR-REC-WEAR-AND-TEAR",

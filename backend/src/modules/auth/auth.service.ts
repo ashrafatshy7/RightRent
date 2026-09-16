@@ -6,10 +6,15 @@ import { defaultPreferences, type UserRecord } from "../../domain/models.js";
 import { getStore } from "../../shared/data/store.js";
 import { HttpError } from "../../shared/http/http-error.js";
 
-function publicUser(user: UserRecord) {
+export function isAdministrator(email: string) {
+  return env.adminEmails.includes(email.toLowerCase());
+}
+
+export function publicUser(user: UserRecord) {
   return {
     id: user.id,
     email: user.email,
+    role: isAdministrator(user.email) ? "ADMIN" as const : "TENANT" as const,
     preferences: user.preferences,
     createdAt: user.createdAt,
   };
@@ -62,6 +67,12 @@ export async function login(email: string, password: string) {
     throw new HttpError(401, "INVALID_CREDENTIALS", "The email or password is incorrect.");
   }
   return { token: tokenFor(user.id), user: publicUser(user) };
+}
+
+export async function getCurrentUser(userId: string) {
+  const user = await (await getStore()).findUserById(userId);
+  if (!user) throw new HttpError(404, "USER_NOT_FOUND", "The user account was not found.");
+  return publicUser(user);
 }
 
 export function verifyAccessToken(token: string) {

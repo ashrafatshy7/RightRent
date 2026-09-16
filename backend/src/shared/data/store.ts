@@ -57,9 +57,13 @@ export interface DataStore {
   acquireLawSyncLease(ownerId: string, expiresAt: Date): Promise<boolean>;
   releaseLawSyncLease(ownerId: string): Promise<void>;
   consumeRateLimit(key: string, expiresAt: Date): Promise<number>;
+  // Paid AI results keyed by a hash of their exact inputs and request configuration.
+  getAiResult(key: string): Promise<unknown | null>;
+  saveAiResult(key: string, value: unknown, expiresAt: Date): Promise<void>;
 }
 
 export class MemoryDataStore implements DataStore {
+  private readonly aiResults = new Map<string, { value: unknown; expiresAt: Date }>();
   private readonly users = new Map<string, UserRecord>();
   private readonly contracts = new Map<string, ContractRecord>();
   private readonly analyses = new Map<string, AnalysisRecord>();
@@ -274,10 +278,25 @@ export class MemoryDataStore implements DataStore {
     }
     return count;
   }
+
+  async getAiResult(key: string) {
+    const record = this.aiResults.get(key);
+    if (!record) return null;
+    if (record.expiresAt.getTime() <= Date.now()) {
+      this.aiResults.delete(key);
+      return null;
+    }
+    return structuredClone(record.value);
+  }
+
+  async saveAiResult(key: string, value: unknown, expiresAt: Date) {
+    this.aiResults.set(key, { value: structuredClone(value), expiresAt });
+  }
 }
 
 type LawSyncLease = { _id: string; ownerId: string; expiresAt: Date };
 type RateLimitRecord = { _id: string; count: number; expiresAt: Date };
+type AiResultRecord = { _id: string; value: unknown; expiresAt: Date };
 
 class MongoDataStore implements DataStore {
   private constructor(private readonly client: MongoClient, private readonly db: Db) {}
@@ -327,6 +346,10 @@ class MongoDataStore implements DataStore {
         { expireAfterSeconds: 0 },
       ),
       this.collection<RateLimitRecord>("rate_limits").createIndex(
+        { expiresAt: 1 },
+        { expireAfterSeconds: 0 },
+      ),
+      this.collection<AiResultRecord>("ai_result_cache").createIndex(
         { expiresAt: 1 },
         { expireAfterSeconds: 0 },
       ),
@@ -604,6 +627,22 @@ class MongoDataStore implements DataStore {
       { upsert: true, returnDocument: "after" },
     );
     return record?.count ?? 1;
+  }
+
+  async getAiResult(key: string) {
+    const record = await this.collection<AiResultRecord>("ai_result_cache").findOne({
+      _id: key,
+      expiresAt: { $gt: new Date() },
+    });
+    return record?.value ?? null;
+  }
+
+  async saveAiResult(key: string, value: unknown, expiresAt: Date) {
+    await this.collection<AiResultRecord>("ai_result_cache").replaceOne(
+      { _id: key },
+      { value, expiresAt },
+      { upsert: true },
+    );
   }
 }
 

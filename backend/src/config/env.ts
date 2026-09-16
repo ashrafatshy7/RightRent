@@ -39,13 +39,14 @@ const dataDriver = choice(
 const analysisProvider = choice(
   "ANALYSIS_PROVIDER",
   process.env.ANALYSIS_PROVIDER ?? "deterministic",
-  ["deterministic", "anthropic"] as const,
+  ["deterministic", "anthropic", "fixture"] as const,
 );
 const piiNerMode = choice(
   "PII_NER_MODE",
   process.env.PII_NER_MODE ?? "regex",
   ["regex", "dictabert"] as const,
 );
+const adminEmails = csv(process.env.ADMIN_EMAILS).map((email) => email.toLowerCase());
 const manageMongoVectorIndex = choice(
   "MONGODB_MANAGE_VECTOR_INDEX",
   process.env.MONGODB_MANAGE_VECTOR_INDEX ?? "true",
@@ -93,12 +94,13 @@ export const env = Object.freeze({
   jwtExpiresInSeconds: integer("JWT_EXPIRES_IN_SECONDS", 60 * 60 * 24, 300, 2_592_000),
   bcryptRounds: integer("BCRYPT_ROUNDS", 12, 10, 15),
   corsOrigins: csv(process.env.CORS_ORIGINS),
+  adminEmails,
   internalApiToken: process.env.INTERNAL_API_TOKEN,
   openAiApiKey: process.env.OPENAI_API_KEY,
   openAiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
   openAiEmbeddingDimensions: integer("OPENAI_EMBEDDING_DIMENSIONS", 1_536, 256, 3_072),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-  anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
+  anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   analysisProvider,
   piiNerMode,
   piiNerEndpoint: process.env.PII_NER_ENDPOINT ?? "http://127.0.0.1:8001",

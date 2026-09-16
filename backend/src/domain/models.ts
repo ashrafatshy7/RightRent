@@ -67,15 +67,76 @@ export type LegalReference = {
   section: string | null;
   sourceUrl: string;
   revisionId: number | null;
+  // A short excerpt of the retrieved statutory text and the date it was fetched as of, so a
+  // tenant (or a reviewer) can see what was actually retrieved without following the link.
+  excerpt: string | null;
+  sourceAsOf: string | null;
+};
+
+// Internal reason bucket behind a severity, kept separate from Severity itself (RED/ORANGE/OK stay
+// the only tenant-facing labels). Derived deterministically from legalAssessment, never from the LLM.
+export type FindingCategory =
+  | "legal_compliance"
+  | "contractual_risk"
+  | "tenant_preference"
+  | "informational";
+
+// How sure the analysis is about a finding. Never shown to the tenant as a raw label (section 24) -
+// it only softens or firms up the generated wording.
+export type ConfidenceLevel = "high" | "medium" | "low";
+
+// A coarse subject tag used to cluster findings that are about the same underlying issue (e.g. a
+// guarantee's amount, realization terms, and return deadline) so the UI does not present near-
+// duplicate cards as unrelated problems.
+export type FindingTopic =
+  | "rent_and_term"
+  | "guarantee_security"
+  | "entry_privacy"
+  | "repairs_maintenance"
+  | "charges_payments"
+  | "termination_renewal"
+  | "waiver_liability"
+  | "pets_and_use"
+  | "handover_condition"
+  | "other";
+
+// A legally defined numeric limit checked in code, never left to the model to compute (section 12).
+// Present on a finding only when a matching deterministic rule applies to its clause.
+export type DeterministicCheck = {
+  ruleId: string;
+  label: string;
+  legalReferenceId: string;
+  contractValue: number;
+  legalLimit: number;
+  calculatedLimit: number;
+  difference: number;
+  unit: "ILS" | "days";
+  passesRule: boolean;
 };
 
 export type Finding = {
   clauseId: string;
   severity: Severity;
+  category: FindingCategory;
+  topic: FindingTopic;
+  confidence: ConfidenceLevel;
   title: string;
+  // The exact contract text the finding is about, verbatim (verified server-side against the
+  // clause; see resolveClauseQuote in analysis.service.ts).
+  clauseQuote: string;
+  // What this finding means for the tenant in plain Hebrew - the primary, first-visible content.
+  plainLanguageExplanation: string;
+  whyItMatters: string;
+  recommendedAction?: string;
+  suggestedReplacementText?: string;
+  // The detailed legal reasoning, secondary/expandable in the UI (kept as `explanation` for
+  // backward compatibility with existing consumers).
   explanation: string;
   legalAssessment: LegalAssessment;
   legalReferences: LegalReference[];
+  deterministicChecks?: DeterministicCheck[];
+  // Other finding IDs (clauseIds) that share this finding's topic, for "related issues" grouping.
+  relatedFindingIds: string[];
   locations: ClauseLocation[];
 };
 
@@ -90,11 +151,15 @@ export type Protection = {
 };
 
 export type AnalysisResult = {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.1.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";
   summary: { critical: number; warnings: number; compliant: number };
+  // A plain-language, one-sentence summary of the overall risk, and up to five clauseIds (from
+  // `findings`, most important first) so the UI can lead with what matters most (section 19-20).
+  headline: string;
+  keyFindingIds: string[];
   findings: Finding[];
   protectionReport: Protection[];
   missingProtections: Protection[];

@@ -21,7 +21,7 @@ healthRouter.get("/ready", async (_request, response) => {
       (await getStore()).healthCheck(),
       checkNerReadiness(),
     ]);
-    const aiReady = env.analysisProvider === "deterministic" || (
+    const aiReady = env.analysisProvider !== "anthropic" || (
       store.activeLawCount === MONITORED_LAW_SOURCES.length
       && store.activeEmbeddingCount > 0
       && store.vectorSearch

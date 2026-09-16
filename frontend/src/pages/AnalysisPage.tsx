@@ -1,0 +1,265 @@
+import { useQuery } from "@tanstack/react-query";
+import {
+  AlertOctagon,
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  Download,
+  ExternalLink,
+  FileCheck2,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { ErrorNotice } from "../components/ErrorNotice";
+import { LoadingState } from "../components/LoadingState";
+import { PageHeader } from "../components/PageHeader";
+import { StatusBadge } from "../components/StatusBadge";
+import { api, messageForError } from "../lib/api-client";
+import { formatCurrency, formatDate, formatDuration, formatNumber } from "../lib/format";
+import type { Analysis, DeterministicCheck, Finding, FindingCategory, Severity } from "../types/api";
+
+const severityMeta: Record<Severity, { label: string; tone: string; icon: typeof AlertOctagon }> = {
+  RED: { label: "דורש טיפול", tone: "danger", icon: AlertOctagon },
+  ORANGE: { label: "כדאי לבדוק", tone: "warning", icon: AlertTriangle },
+  OK: { label: "תקין", tone: "success", icon: CheckCircle2 },
+};
+
+// The severity badge (RED/ORANGE/OK) stays the single top-level label. This is a secondary,
+// smaller chip shown alongside it so a tenant can tell a genuine legal problem apart from a
+// negotiable risk or a personal-preference mismatch, without introducing a second severity system.
+const categoryMeta: Record<FindingCategory, string> = {
+  legal_compliance: "בעיה משפטית",
+  contractual_risk: "סיכון חוזי",
+  tenant_preference: "התאמה להעדפות שלך",
+  informational: "מידע כללי",
+};
+
+function formatCheckValue(value: number, unit: DeterministicCheck["unit"]) {
+  return unit === "ILS" ? formatCurrency(value) : `${formatNumber(value)} ימים`;
+}
+
+export function AnalysisPage() {
+  const { analysisId = "" } = useParams();
+  const { token } = useAuth();
+  const [filter, setFilter] = useState<Severity | "ALL">("ALL");
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const query = useQuery({ queryKey: ["analysis", analysisId], queryFn: () => api.getAnalysis(token!, analysisId), enabled: Boolean(analysisId) });
+  const analysis = query.data?.analysis;
+  const findingsByClauseId = useMemo(
+    () => new Map((analysis?.findings ?? []).map((finding) => [finding.clauseId, finding])),
+    [analysis],
+  );
+  const filtered = useMemo(() => analysis?.findings.filter((finding) => filter === "ALL" || finding.severity === filter) ?? [], [analysis, filter]);
+  const keyFindings = useMemo(
+    () => (analysis?.keyFindingIds ?? [])
+      .map((clauseId) => findingsByClauseId.get(clauseId))
+      .filter((finding): finding is Finding => Boolean(finding)),
+    [analysis, findingsByClauseId],
+  );
+
+  if (query.isLoading) return <LoadingState label="פותחים את מפת החוזה" />;
+  if (query.error || !analysis) return <ErrorNotice message={messageForError(query.error, "הניתוח לא נמצא.")} />;
+
+  async function openMarkedPdf() {
+    setPdfError(null);
+    try {
+      const blob = await api.getMarkedPdf(token!, analysisId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      setPdfError(messageForError(error));
+    }
+  }
+
+  return (
+    <div className="page-wrap analysis-page">
+      <PageHeader eyebrow={`ניתוח ${analysis.analysisId.slice(0, 8)}`} title="מפת החוזה שלך" description={`הושלם ${formatDate(analysis.createdAt)} · ${formatDuration(analysis.timingMs.total)}`} actions={analysis.markedPdf ? <button className="secondary-button" type="button" onClick={openMarkedPdf}><Download size={17} /> PDF מסומן</button> : undefined} />
+      {pdfError ? <ErrorNotice message={pdfError} /> : null}
+      <section className="analysis-overview">
+        <ScoreCard tone="critical" value={analysis.summary.critical} label="סעיפים קריטיים" icon={AlertOctagon} />
+        <ScoreCard tone="warning" value={analysis.summary.warnings} label="אזהרות והתאמות" icon={AlertTriangle} />
+        <ScoreCard tone="success" value={analysis.summary.compliant} label="סעיפים תקינים" icon={CheckCircle2} />
+        <article className="privacy-card"><ShieldCheck size={24} /><div><strong>הפרטיות נשמרה</strong><span>{analysis.privacy.redactedEntityCount} פרטים הוסרו · {analysis.privacy.mode === "REGEX_AND_DICTABERT" ? "DictaBERT מקומי" : "מצב בדיקה"}</span></div></article>
+      </section>
+
+      {analysis.headline || keyFindings.length ? (
+        <section className="top-summary">
+          {analysis.headline ? <div className="top-summary-headline"><Sparkles size={20} /><p>{analysis.headline}</p></div> : null}
+          {keyFindings.length ? (
+            <div>
+              <span className="eyebrow">החשוב ביותר</span>
+              <ol className="top-summary-list">
+                {keyFindings.map((finding) => (
+                  <li key={finding.clauseId}>
+                    <a href={`#finding-${finding.clauseId}`}>
+                      <StatusBadge tone={severityMeta[finding.severity].tone}>{severityMeta[finding.severity].label}</StatusBadge>
+                      <span>{finding.title}</span>
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      <div className="analysis-columns">
+        <section className="findings-section">
+          <div className="section-heading"><div><span className="eyebrow">סעיף אחר סעיף</span><h2>הממצאים</h2></div><div className="filter-pills">{(["ALL", "RED", "ORANGE", "OK"] as const).map((value) => <button key={value} className={filter === value ? "active" : ""} type="button" onClick={() => setFilter(value)}>{value === "ALL" ? "הכול" : severityMeta[value].label}</button>)}</div></div>
+          <div className="findings-list">{filtered.map((finding) => <FindingCard key={finding.clauseId} finding={finding} findingsByClauseId={findingsByClauseId} />)}</div>
+        </section>
+
+        <aside className="protection-panel">
+          <div className="section-heading"><div><span className="eyebrow">מעבר לסעיפים</span><h2>הגנות שכדאי לבדוק</h2></div><FileCheck2 size={24} /></div>
+          <div className="protection-progress"><span style={{ width: `${coveragePercent(analysis)}%` }} /><small>{coveragePercent(analysis)}% מההגנות מכוסות</small></div>
+          <div className="protection-list">
+            {analysis.protectionReport.map((protection) => {
+              const linkedFindings = protection.relevantClauseIds
+                .map((clauseId) => findingsByClauseId.get(clauseId))
+                .filter((finding): finding is Finding => Boolean(finding));
+              return (
+                <article key={protection.protectionId} className={`protection-item protection-${protection.status.toLowerCase()}`}>
+                  <div><strong>{protection.title}</strong><StatusBadge tone={protection.status === "COVERED" ? "success" : protection.status === "PARTIAL" ? "warning" : "danger"}>{protection.status === "COVERED" ? "מכוסה" : protection.status === "PARTIAL" ? "חלקי" : "חסר"}</StatusBadge></div>
+                  <p>{protection.explanation}</p>
+                  {linkedFindings.length ? (
+                    <p className="protection-cross-link">
+                      קשור לממצא: {linkedFindings.map((finding, index) => (
+                        <span key={finding.clauseId}>{index > 0 ? ", " : ""}<a href={`#finding-${finding.clauseId}`}>{finding.title}</a></span>
+                      ))}
+                    </p>
+                  ) : null}
+                  {protection.suggestedText ? <details><summary>ניסוח מוצע</summary><blockquote>{protection.suggestedText}</blockquote></details> : null}
+                </article>
+              );
+            })}
+          </div>
+        </aside>
+      </div>
+      <div className="legal-disclaimer"><ShieldCheck size={18} /><span>הניתוח הוא כלי תומך החלטה ואינו ייעוץ משפטי. בממצא קריטי מומלץ להתייעץ עם איש מקצוע.</span></div>
+    </div>
+  );
+}
+
+function ScoreCard({ tone, value, label, icon: Icon }: { tone: string; value: number; label: string; icon: typeof AlertOctagon }) {
+  return <article className={`score-card score-${tone}`}><span><Icon size={22} /></span><div><strong>{value}</strong><small>{label}</small></div></article>;
+}
+
+function FindingCard({ finding, findingsByClauseId }: { finding: Finding; findingsByClauseId: Map<string, Finding> }) {
+  const meta = severityMeta[finding.severity];
+  const Icon = meta.icon;
+  const [copied, setCopied] = useState(false);
+  // Analyses saved before this redesign lack the new fields entirely; these fall back gracefully
+  // instead of crashing (e.g. .map on a missing relatedFindingIds) so older history stays viewable.
+  const relatedFindings = (finding.relatedFindingIds ?? [])
+    .map((clauseId) => findingsByClauseId.get(clauseId))
+    .filter((related): related is Finding => Boolean(related));
+  const plainLanguageExplanation = finding.plainLanguageExplanation ?? finding.explanation;
+
+  async function copySuggestedText() {
+    if (!finding.suggestedReplacementText) return;
+    try {
+      await navigator.clipboard.writeText(finding.suggestedReplacementText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      // Clipboard access can be blocked by the browser; the text is still visible to copy by hand.
+    }
+  }
+
+  return (
+    <article id={`finding-${finding.clauseId}`} className={`finding-card finding-${finding.severity.toLowerCase()}`}>
+      <div className="finding-marker"><Icon size={20} /></div>
+      <div className="finding-body">
+        <header>
+          <div><span>{finding.clauseId}</span><h3>{finding.title}</h3></div>
+          <div className="finding-badges">
+            <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
+            {finding.severity !== "OK" && finding.category ? <span className="finding-category-chip">{categoryMeta[finding.category]}</span> : null}
+          </div>
+        </header>
+
+        {finding.clauseQuote ? <blockquote className="finding-quote"><span className="eyebrow">מה כתוב בחוזה</span>{finding.clauseQuote}</blockquote> : null}
+
+        <div className="finding-section">
+          <strong>מה זה אומר עבורכם</strong>
+          <p>{plainLanguageExplanation}</p>
+        </div>
+
+        {finding.severity !== "OK" && finding.whyItMatters ? (
+          <div className="finding-section">
+            <strong>למה סימנו את זה</strong>
+            <p>{finding.whyItMatters}</p>
+          </div>
+        ) : null}
+
+        {finding.recommendedAction ? (
+          <div className="finding-action">
+            <strong>מה כדאי לעשות</strong>
+            <p>{finding.recommendedAction}</p>
+          </div>
+        ) : null}
+
+        {relatedFindings.length ? (
+          <p className="finding-related">
+            קשור גם ל: {relatedFindings.map((related, index) => (
+              <span key={related.clauseId}>{index > 0 ? ", " : ""}<a href={`#finding-${related.clauseId}`}>{related.title}</a></span>
+            ))}
+          </p>
+        ) : null}
+
+        {finding.suggestedReplacementText ? (
+          <details className="finding-suggestion">
+            <summary>ניסוח מוצע לשיחה עם המשכיר</summary>
+            <blockquote>{finding.suggestedReplacementText}</blockquote>
+            <div className="finding-suggestion-actions">
+              <button className="ghost-button compact-button" type="button" onClick={copySuggestedText}><Copy size={14} /> {copied ? "הועתק" : "העתקת הניסוח"}</button>
+              <small>הצעת ניסוח למשא ומתן בלבד, לא ייעוץ משפטי מחייב.</small>
+            </div>
+          </details>
+        ) : null}
+
+        <details className="finding-legal-details">
+          <summary>הסבר משפטי מורחב ומקורות</summary>
+          <p>{finding.explanation}</p>
+          {finding.deterministicChecks?.length ? (
+            <ul className="deterministic-checks">
+              {finding.deterministicChecks.map((check) => (
+                <li key={check.ruleId}>
+                  {check.label}: {formatCheckValue(check.contractValue, check.unit)} לעומת התקרה {formatCheckValue(check.calculatedLimit, check.unit)}
+                  {check.passesRule ? " (בתוך התקרה)" : " (מעל התקרה)"}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {finding.legalReferences.length ? (
+            <>
+              <div className="legal-references">
+                {finding.legalReferences.map((reference) => (
+                  <a key={reference.lawReferenceId} href={reference.sourceUrl} target="_blank" rel="noreferrer"><ScaleReference />{reference.lawName}{reference.section ? ` · סעיף ${reference.section}` : ""}<ExternalLink size={13} /></a>
+                ))}
+              </div>
+              {finding.legalReferences.filter((reference) => reference.excerpt).map((reference) => (
+                <blockquote key={reference.lawReferenceId} className="legal-excerpt">
+                  {reference.excerpt}
+                  {reference.sourceAsOf ? <cite> — {reference.lawName}, מאוחזר {formatDate(reference.sourceAsOf)}</cite> : null}
+                </blockquote>
+              ))}
+            </>
+          ) : null}
+        </details>
+      </div>
+    </article>
+  );
+}
+
+function ScaleReference() { return <span aria-hidden="true">§</span>; }
+
+function coveragePercent(analysis: Analysis) {
+  if (!analysis.protectionReport.length) return 100;
+  const score = analysis.protectionReport.reduce((total, protection) => total + (protection.status === "COVERED" ? 1 : protection.status === "PARTIAL" ? 0.5 : 0), 0);
+  return Math.round(score / analysis.protectionReport.length * 100);
+}

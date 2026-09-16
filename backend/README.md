@@ -23,6 +23,10 @@ npm install
 npm run dev
 ```
 
+`ADMIN_EMAILS` is a comma-separated allowlist. A registered account whose normalized email is in
+that list receives the `ADMIN` role from the server and can use the law-review dashboard. The role
+is never accepted from a client request or stored in a browser-editable profile field.
+
 `ANALYSIS_PROVIDER=deterministic` is the offline fixture mode. Before enabling
 `ANALYSIS_PROVIDER=anthropic`, start `services/hebrew-ner`, set
 `PII_NER_MODE=dictabert`, and configure the same private `PII_NER_TOKEN` in both
@@ -80,6 +84,7 @@ Public:
 
 Authenticated with `Authorization: Bearer <token>`:
 
+- `GET /api/auth/me`
 - `GET /api/users/preferences`
 - `PUT /api/users/preferences`
 - `POST /api/contracts/upload` — multipart field `contract`
@@ -90,6 +95,19 @@ Authenticated with `Authorization: Bearer <token>`:
 - `DELETE /api/history/:id`
 - `GET /api/negotiation/:analysisId`
 - `POST /api/negotiation/:analysisId`
+
+Administrator, authenticated with the same Bearer token and restricted by `ADMIN_EMAILS`:
+
+- `GET /api/admin/laws/status`
+- `POST /api/admin/laws/sync`
+- `POST /api/admin/laws/:israelLawId/approve` with
+  `{ "revisionId": number, "contentHash": string, "sectionCount": number,
+  "sectionsHash": string, "confirmedComplete": true, "verifiedBy": string,
+  "verificationReference": string }`
+
+These are the browser-safe management routes used by the frontend. The server verifies the
+administrator from its own allowlist; the frontend never receives or sends the internal
+maintenance token.
 
 Negotiation actions are `START`, `SET_PRIORITIES`, `CHOOSE_STRATEGY`, `SAVE_DRAFT`, and
 `COMPLETE`. The only valid state path is `PRIORITIZE -> STRATEGY -> DRAFT -> COUNTER -> DONE`.
@@ -149,10 +167,18 @@ applies the deterministic rule `violation -> RED`, `risk/preference conflict -> 
 `OK`. A claimed violation without a retrieved legal reference is rejected instead of being shown
 to the tenant.
 
-After clause analysis, a separate contract-level Claude request evaluates every predefined
-protection as `COVERED`, `PARTIAL`, or `MISSING`, maps it to clause IDs, and suggests text for
-incomplete protections. RAG analysis is disabled unless all 13 monitored laws have approved
-`ACTIVE` versions.
+In parallel with clause analysis, a separate contract-level Claude request evaluates every
+predefined protection as `COVERED`, `PARTIAL`, or `MISSING`, maps it to clause IDs, and suggests
+text for incomplete protections. RAG analysis is disabled unless all 13 monitored laws have
+approved `ACTIVE` versions.
+
+Claude calls use `ANTHROPIC_MODEL` (default `claude-sonnet-5`) with adaptive thinking and a
+per-call effort level, and always stream: a call fails only when its stream stays silent for 60
+seconds. Rate limits, overload, and connection failures are retried; timeouts and broken streams
+are not, because the partial response is already billed. Each clause verdict and protection report
+is saved in `ai_result_cache` for seven days, keyed by a hash of the tenant, preferences, active law
+versions, redacted input, and request configuration, so retrying a failed analysis pays only for
+the calls that did not finish.
 
 Text PDFs are extracted with `pdfjs-dist`, preserving text-item coordinates. Every scanned page,
 including a scanned page inside a mixed PDF, is rendered with `@napi-rs/canvas`; Tesseract.js word
