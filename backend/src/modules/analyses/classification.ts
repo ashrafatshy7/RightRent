@@ -40,6 +40,15 @@ function normalizeForQuoteMatch(text: string) {
   return text.replace(/\s+/gu, " ").trim();
 }
 
+// Some PDF extractors (notably ones that place Hebrew glyphs one at a time instead of as normal
+// text runs) inject a stray single space between every character of the extracted clause text.
+// Collapsing runs of whitespace to one space (normalizeForQuoteMatch) does nothing for that case -
+// every gap is already exactly one space - so the verbatim check needs to ignore whitespace
+// entirely to recognize a genuinely-verbatim candidate against such a clause.
+function stripWhitespace(text: string) {
+  return text.replace(/\s+/gu, "");
+}
+
 // clauseQuote is supposed to be the exact contract text, but it comes from a language model, so it
 // is never trusted blindly: this accepts it only when it is genuinely a substring of the clause
 // (whitespace-insensitive), and otherwise falls back to a safe excerpt of the real clause text -
@@ -47,7 +56,8 @@ function normalizeForQuoteMatch(text: string) {
 export function resolveClauseQuote(clause: ContractClause, candidate: string): string {
   const normalizedClause = normalizeForQuoteMatch(clause.text);
   const normalizedCandidate = normalizeForQuoteMatch(candidate);
-  if (normalizedCandidate && normalizedClause.includes(normalizedCandidate)) return normalizedCandidate;
+  const compactCandidate = stripWhitespace(candidate);
+  if (compactCandidate && stripWhitespace(clause.text).includes(compactCandidate)) return normalizedCandidate;
   if (normalizedClause.length <= 280) return normalizedClause;
   return `${normalizedClause.slice(0, 277)}...`;
 }
