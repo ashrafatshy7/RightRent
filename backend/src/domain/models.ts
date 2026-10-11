@@ -279,6 +279,9 @@ export type LawSourceState = {
   candidateSectionCount: number | null;
   candidateSectionsHash: string | null;
   candidateSectionKeys: string[];
+  // The candidate changes the approved text with neither a new Knesset publication nor an
+  // approved deferred amendment entering into force to account for it.
+  candidateUnmatched: boolean;
   checkedAt: string;
   verifiedAt: string | null;
   verifiedBy: string | null;
@@ -289,6 +292,7 @@ export type LawSourceState = {
 export type LawSyncStatus =
   | "UNCHANGED"
   | "CANDIDATE_STAGED"
+  | "AUTO_APPROVED"
   | "OFFICIAL_UPDATE_PENDING"
   | "WIKISOURCE_CHANGED"
   | "FAILED";

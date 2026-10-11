@@ -335,7 +335,7 @@ async function protectionReport(
 async function lawCorpusFingerprint(store: DataStore): Promise<LawCorpusFingerprint> {
   if (env.analysisProvider !== "anthropic") return "deterministic-fixture-v1";
   return (await store.listLawSourceStates())
-    .filter((state) => state.status === "ACTIVE")
+    .filter((state) => state.activeRevisionId !== null)
     .map((state) => ({
       israelLawId: state.israelLawId,
       fingerprint: state.activeOfficialFingerprint,
@@ -377,9 +377,11 @@ export async function analyzeContract(
       : "deterministic";
   traceAnalysis(`Starting contract ${contractId}: ${contract.clauses.length} clauses, provider ${providerLabel}.`);
   if (env.analysisProvider === "anthropic") {
+    // A law keeps serving its approved version while a newer one is pending or a check failed,
+    // so only a law that was never approved holds analysis back.
     const activeIds = new Set(
       (await store.listLawSourceStates())
-        .filter((state) => state.status === "ACTIVE")
+        .filter((state) => state.activeRevisionId !== null)
         .map((state) => state.israelLawId),
     );
     const unavailable = MONITORED_LAW_SOURCES

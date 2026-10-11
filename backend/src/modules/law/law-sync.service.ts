@@ -21,6 +21,8 @@ import {
 } from "./wikisource-law.service.js";
 
 const EMBEDDING_BATCH_SIZE = 32;
+const MIN_RETAINED_SECTION_RATIO = 0.9;
+export const AUTO_APPROVER = "RightRent auto-approval";
 
 function israelDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -96,6 +98,7 @@ function observedState(
     candidateSectionCount: candidate ? wiki.chunks.length : null,
     candidateSectionsHash: candidate ? wiki.sectionsHash : null,
     candidateSectionKeys: candidate ? wiki.sectionKeys : [],
+    candidateUnmatched: false,
     checkedAt,
     verifiedAt: previous?.verifiedAt ?? null,
     verifiedBy: previous?.verifiedBy ?? null,
@@ -149,6 +152,7 @@ function failedState(
     candidateSectionCount: null,
     candidateSectionsHash: null,
     candidateSectionKeys: [],
+    candidateUnmatched: false,
     checkedAt,
     verifiedAt: null,
     verifiedBy: null,
@@ -191,6 +195,51 @@ async function createEmbeddingRecords(
   return records;
 }
 
+// A staged candidate replaces the approved version without review only when an official source
+// accounts for the change, the Wikisource revision has stood unedited long enough for vandalism
+// or a half-finished consolidation to be reverted or completed, and the section manifest has not
+// collapsed the way it does when the parser stops recognizing the page. Anything else, including
+// the first version of a law, waits for an administrator while the approved version stays in use.
+function autoApprovalReference(state: LawSourceState) {
+  if (state.activeRevisionId === null
+    || state.candidateRevisionId !== state.observedRevisionId
+    || state.candidateUnmatched
+    || !state.activeSectionKeys.length) return null;
+  const settledMs = Date.now() - Date.parse(state.observedRevisionTimestamp);
+  if (!(settledMs >= env.lawAutoApprovalSettleHours * 60 * 60 * 1_000)) return null;
+  const candidateKeys = new Set(state.candidateSectionKeys);
+  const retained = state.activeSectionKeys.filter((key) => candidateKeys.has(key)).length;
+  if (retained < state.activeSectionKeys.length * MIN_RETAINED_SECTION_RATIO) return null;
+
+  const cause = state.candidateOfficialFingerprint === state.activeOfficialFingerprint
+    ? `a deferred amendment in force on ${state.candidateSourceAsOf}, matching approved revision ${state.activeRevisionId}`
+    : `the Knesset publication of ${state.latestOfficialPublicationDate}`;
+  return `Explained by ${cause}. Wikisource revision ${state.candidateRevisionId} unedited since `
+    + `${state.observedRevisionTimestamp}; ${retained}/${state.activeSectionKeys.length} approved sections retained.`;
+}
+
+// Activation happens after the check is recorded, so a failure here must not reach the check's
+// error handling, which would overwrite the staged state with the one read before the check.
+async function autoApprove(state: LawSourceState, sync: LawSyncRecord): Promise<LawSyncRecord> {
+  const reference = autoApprovalReference(state);
+  if (!reference) return sync;
+  try {
+    const active = await (await getStore()).activateLawVersion(
+      state.israelLawId,
+      state.candidateRevisionId!,
+      state.candidateContentHash!,
+      state.candidateSectionCount!,
+      state.candidateSectionsHash!,
+      AUTO_APPROVER,
+      reference,
+    );
+    return active ? { ...sync, status: "AUTO_APPROVED" } : sync;
+  } catch (error) {
+    console.error(`Auto-approval of law ${state.israelLawId} failed; the candidate stays staged for review.`, error);
+    return sync;
+  }
+}
+
 export async function checkMonitoredLaw(source: MonitoredLawSource) {
   const store = await getStore();
   const previous = await store.getLawSourceState(source.israelLawId);
@@ -224,8 +273,10 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
       && previous.candidateRevisionId === wiki.revisionId
       && previous.candidateContentHash === wiki.contentHash;
     if (candidateAlreadyStaged) {
+      const candidateUnmatched = previous.candidateUnmatched === true;
+      const status = candidateUnmatched ? "WIKISOURCE_CHANGED" : "AWAITING_VERIFICATION";
       const state: LawSourceState = {
-        ...observedState(source, previous, official, wiki, "AWAITING_VERIFICATION", checkedAt, false),
+        ...observedState(source, previous, official, wiki, status, checkedAt, false),
         candidateOfficialFingerprint: previous.candidateOfficialFingerprint,
         candidateRevisionId: previous.candidateRevisionId,
         candidateSourceAsOf: previous.candidateSourceAsOf,
@@ -235,21 +286,25 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
         candidateSectionKeys: previous.candidateSectionKeys?.length
           ? previous.candidateSectionKeys
           : wiki.sectionKeys,
+        candidateUnmatched,
       };
       const sync = syncRecord(source, "UNCHANGED", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
-      return sync;
+      return autoApprove(state, sync);
     }
 
+    let candidateUnmatched = false;
     if (previous?.activeOfficialFingerprint === official.fingerprint
+      && previous.activeRevisionId !== null
       && previous.activeRevisionId !== wiki.revisionId) {
-      const state = observedState(source, previous, official, wiki, "WIKISOURCE_CHANGED", checkedAt, false);
-      const sync = syncRecord(source, "WIKISOURCE_CHANGED", checkedAt, official, wiki);
-      await store.recordLawCheck(state, sync);
-      return sync;
-    }
-
-    if (previous?.activeContentHash === wiki.contentHash) {
+      // Wikisource changed the text without a new Knesset publication. That is expected when a
+      // deferred amendment in the approved revision enters into force: the bot then merges it,
+      // and the approved revision read as of today already yields the same text. Any other
+      // change is still staged, so it never blocks the law, but is flagged for closer review.
+      const approved = await fetchWikisourceLawVersion(source, wiki.sourceAsOf, previous.activeRevisionId);
+      candidateUnmatched = approved.contentHash !== wiki.contentHash
+        || approved.sectionsHash !== wiki.sectionsHash;
+    } else if (previous?.activeContentHash === wiki.contentHash) {
       const state = observedState(source, previous, official, wiki, "OFFICIAL_UPDATE_PENDING", checkedAt, false);
       const sync = syncRecord(source, "OFFICIAL_UPDATE_PENDING", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
@@ -257,10 +312,27 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
     }
 
     const embeddings = await createEmbeddingRecords(official, wiki);
-    const state = observedState(source, previous, official, wiki, "AWAITING_VERIFICATION", checkedAt, true);
-    const sync = syncRecord(source, "CANDIDATE_STAGED", checkedAt, official, wiki);
+    const state: LawSourceState = {
+      ...observedState(
+        source,
+        previous,
+        official,
+        wiki,
+        candidateUnmatched ? "WIKISOURCE_CHANGED" : "AWAITING_VERIFICATION",
+        checkedAt,
+        true,
+      ),
+      candidateUnmatched,
+    };
+    const sync = syncRecord(
+      source,
+      candidateUnmatched ? "WIKISOURCE_CHANGED" : "CANDIDATE_STAGED",
+      checkedAt,
+      official,
+      wiki,
+    );
     await store.stageLawVersion(embeddings, state, sync);
-    return sync;
+    return autoApprove(state, sync);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown synchronization error";
     const state = failedState(source, previous, checkedAt, reason);

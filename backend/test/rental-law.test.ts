@@ -49,6 +49,28 @@ test("a future effective provision produces different embedding input", () => {
   assert.match(future.find((chunk) => chunk.section === "25י")?.text ?? "", /נותן ערבות אחר/u);
 });
 
+test("a deferred restatement of a paragraph replaces the earlier version once in force", () => {
+  const restated = `
+    <div id="law-content">
+      <div class="law-number">22יט.</div><div class="law-desc">השבת העירבון</div>
+      <div class="law-main"><div></div>
+        <div class="law-content1">העירבון, למעט אם היה ערבות בנקאית, יוחזר בתוספת ריבית שקלית.</div>
+        <div class="law-content1"><span class="law-note">(החל מיום 30.9.2026):</span> העירבון, למעט אם היה ערבות בנקאית או ערבות מנותן ערבות אחר, יוחזר בתוספת ריבית שקלית.</div>
+        <div class="law-content1"><span class="law-note">(החל מיום 30.9.2026):</span> פסקה חדשה שנוספה בתיקון ואינה מחליפה דבר.</div>
+      </div>
+    </div>`;
+  const textOn = (asOf: string) => JSON.stringify(parseWikisourceLaw(restated, asOf));
+
+  const before = textOn("2026-09-29");
+  assert.match(before, /ערבות בנקאית, יוחזר/u);
+  assert.doesNotMatch(before, /מנותן ערבות אחר|פסקה חדשה/u);
+
+  const after = textOn("2026-09-30");
+  assert.doesNotMatch(after, /ערבות בנקאית, יוחזר/u);
+  assert.equal(after.split("מנותן ערבות אחר").length - 1, 1);
+  assert.match(after, /פסקה חדשה שנוספה בתיקון/u);
+});
+
 test("repeated section numbers receive stable unique manifest identifiers", () => {
   const clause = (number: string, content: string) => ({
     number,
