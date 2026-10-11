@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FileClock, FileSearch, Trash2 } from "lucide-react";
+import { ArrowLeft, FileClock, FileSearch, GitCompareArrows, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { EmptyState } from "../components/EmptyState";
@@ -9,6 +9,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ROUTES } from "../config/app";
 import { api, messageForError } from "../lib/api-client";
 import { formatDate, formatDuration } from "../lib/format";
+import { groupByContract, previousVersionAnalysis } from "../lib/versions";
 
 export function HistoryPage() {
   const { token } = useAuth();
@@ -29,15 +30,26 @@ export function HistoryPage() {
       {analyses.length === 0 ? (
         <EmptyState icon={FileClock} title="הארכיון עדיין ריק" action={<Link className="primary-button" to={ROUTES.upload}>בדיקת חוזה ראשון</Link>}>הניתוח הראשון שתבצעו יופיע כאן עם המסמך המסומן.</EmptyState>
       ) : (
-        <div className="history-list">
-          {analyses.map((analysis, index) => (
-            <article className="history-item" key={analysis.analysisId}>
-              <div className="history-number">{String(analyses.length - index).padStart(2, "0")}</div>
-              <div className="history-main"><span>{formatDate(analysis.createdAt)}</span><h2>בדיקת חוזה שכירות</h2><small>מזהה {analysis.analysisId.slice(0, 12)}</small></div>
-              <div className="history-summary"><span className="summary-red"><b>{analysis.summary.critical}</b> קריטיים</span><span className="summary-orange"><b>{analysis.summary.warnings}</b> אזהרות</span><span className="summary-green"><b>{analysis.summary.compliant}</b> תקינים</span></div>
-              <div className="history-meta"><span>{formatDuration(analysis.timingMs.total)}</span><small>{analysis.privacy.redactedEntityCount} פרטים הוסרו</small></div>
-              <div className="history-actions"><Link to={ROUTES.analysis(analysis.analysisId)} aria-label="פתיחת הניתוח"><ArrowLeft size={19} /></Link><button type="button" disabled={remove.isPending} onClick={() => { if (window.confirm("למחוק לצמיתות את הניתוח והקבצים שלו?")) remove.mutate(analysis.analysisId); }} aria-label="מחיקת הניתוח"><Trash2 size={17} /></button></div>
-            </article>
+        <div className="history-groups">
+          {groupByContract(analyses).map((group) => (
+            <section key={group.rootContractId} className="history-group" aria-label={group.fileName}>
+              <header><h2>{group.fileName}</h2>{group.versionCount > 1 ? <span>{group.versionCount} גרסאות</span> : null}</header>
+              <div className="history-list">
+                {group.entries.map((analysis) => {
+                  const previous = previousVersionAnalysis(analyses, analysis.analysisId);
+                  const version = analysis.contract?.version ?? 1;
+                  return (
+                    <article className="history-item" key={analysis.analysisId}>
+                      <div className="history-number">{String(version).padStart(2, "0")}</div>
+                      <div className="history-main"><span>{formatDate(analysis.createdAt)}</span><h2>{group.versionCount > 1 ? `גרסה ${version}` : "בדיקת חוזה שכירות"}</h2><small>מזהה {analysis.analysisId.slice(0, 12)}</small></div>
+                      <div className="history-summary"><span className="summary-red"><b>{analysis.summary.critical}</b> קריטיים</span><span className="summary-orange"><b>{analysis.summary.warnings}</b> אזהרות</span><span className="summary-green"><b>{analysis.summary.compliant}</b> תקינים</span></div>
+                      <div className="history-meta">{previous ? <Link className="history-compare" to={ROUTES.compare(previous.analysisId, analysis.analysisId)}><GitCompareArrows size={15} /> מה השתנה</Link> : <><span>{formatDuration(analysis.timingMs.total)}</span><small>{analysis.privacy.redactedEntityCount} פרטים הוסרו</small></>}</div>
+                      <div className="history-actions"><Link to={ROUTES.analysis(analysis.analysisId)} aria-label="פתיחת הניתוח"><ArrowLeft size={19} /></Link><button type="button" disabled={remove.isPending} onClick={() => { if (window.confirm("למחוק לצמיתות את הניתוח והקבצים שלו?")) remove.mutate(analysis.analysisId); }} aria-label="מחיקת הניתוח"><Trash2 size={17} /></button></div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
           ))}
         </div>
       )}

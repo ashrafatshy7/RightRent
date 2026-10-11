@@ -95,16 +95,24 @@ function statusOf(change: AlignmentChange, before: ComparisonSide | null, after:
   return change === "UNCHANGED" ? "UNCHANGED" : "UNREQUESTED_CHANGE";
 }
 
+// Hebrew agreement: "בעיה אחת" but "3 בעיות", and a conjunction before a digit takes a maqaf ("ו־2").
+function counted(count: number, one: string, many: string) {
+  return count === 1 ? one : `${count} ${many}`;
+}
+
 function headline(counts: Record<ComparisonStatus, number>, issuesBefore: number) {
   const parts: string[] = [];
   const fixed = counts.FIXED + counts.IMPROVED;
   parts.push(issuesBefore
-    ? `המשכיר תיקן או שיפר ${fixed} מתוך ${issuesBefore} הבעיות שמצאנו בגרסה הקודמת`
+    ? `המשכיר תיקן או שיפר ${fixed} מתוך ${counted(issuesBefore, "הבעיה", "הבעיות")} שמצאנו בגרסה הקודמת`
     : "בגרסה הקודמת לא מצאנו בעיות");
-  if (counts.NEW_ISSUE + counts.WORSENED) parts.push(`נוספו או החמירו ${counts.NEW_ISSUE + counts.WORSENED} בעיות`);
-  if (counts.UNREQUESTED_CHANGE) parts.push(`${counts.UNREQUESTED_CHANGE} סעיפים השתנו בלי שזוהו בהם בעיות - כדאי לוודא שהשינוי מקובל עליכם`);
-  if (parts.length === 1) return `${parts[0]}.`;
-  return `${parts.slice(0, -1).join(", ")} ו${parts.at(-1)}.`;
+  const added = counts.NEW_ISSUE + counts.WORSENED;
+  if (added) parts.push(added === 1 ? "נוספה או החמירה בעיה אחת" : `נוספו או החמירו ${added} בעיות`);
+  const unrequested = counts.UNREQUESTED_CHANGE;
+  if (unrequested) parts.push(unrequested === 1 ? "סעיף אחד השתנה בלי שביקשתם" : `${unrequested} סעיפים השתנו בלי שביקשתם`);
+  const last = parts.pop()!;
+  const sentence = parts.length ? `${parts.join(", ")} ו${/^\d/u.test(last) ? "־" : ""}${last}.` : `${last}.`;
+  return unrequested ? `${sentence} כדאי לוודא שהשינויים האלה מקובלים עליכם.` : sentence;
 }
 
 async function totalCost(analysis: AnalysisRecord, annualInflationPercent: number) {

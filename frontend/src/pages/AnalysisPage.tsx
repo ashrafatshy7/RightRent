@@ -6,6 +6,8 @@ import {
   Copy,
   Calculator,
   Download,
+  FilePlus2,
+  GitCompareArrows,
   ExternalLink,
   GitMerge,
   Link2,
@@ -16,16 +18,18 @@ import {
   Sparkles,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { CostSimulator } from "../components/CostSimulator";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import { ROUTES } from "../config/app";
 import { api, messageForError } from "../lib/api-client";
 import { clauseLabel, formatCurrency, formatDate, formatDuration, formatNumber } from "../lib/format";
 import { useMediaQuery } from "../lib/use-media-query";
+import { previousVersionAnalysis } from "../lib/versions";
 import type { Analysis, CrossClauseIssueKind, DeterministicCheck, Finding, FindingCategory, Severity } from "../types/api";
 import type { FocusRequest, ViewerHighlight } from "../components/ContractViewer";
 
@@ -86,6 +90,9 @@ export function AnalysisPage() {
   const isNarrow = useMediaQuery(NARROW_LAYOUT_QUERY);
   const query = useQuery({ queryKey: ["analysis", analysisId], queryFn: () => api.getAnalysis(token!, analysisId), enabled: Boolean(analysisId) });
   const analysis = query.data?.analysis;
+  const history = useQuery({ queryKey: ["history"], queryFn: () => api.getHistory(token!) });
+  const historyEntry = history.data?.analyses.find((entry) => entry.analysisId === analysisId);
+  const previousVersion = history.data ? previousVersionAnalysis(history.data.analyses, analysisId) : null;
   const contractFile = useQuery({
     queryKey: ["contract-file", analysis?.contractId],
     queryFn: () => api.getContractFile(token!, analysis!.contractId),
@@ -199,7 +206,18 @@ export function AnalysisPage() {
 
   return (
     <div className="page-wrap analysis-page">
-      <PageHeader eyebrow={`ניתוח ${analysis.analysisId.slice(0, 8)}`} title="מפת החוזה שלך" description={`הושלם ${formatDate(analysis.createdAt)} · ${formatDuration(analysis.timingMs.total)}`} actions={analysis.markedPdf ? <button className="secondary-button" type="button" onClick={openMarkedPdf}><Download size={17} /> PDF מסומן</button> : undefined} />
+      <PageHeader
+        eyebrow={`ניתוח ${analysis.analysisId.slice(0, 8)}${historyEntry?.contract && historyEntry.contract.version > 1 ? ` · גרסה ${historyEntry.contract.version}` : ""}`}
+        title="מפת החוזה שלך"
+        description={`הושלם ${formatDate(analysis.createdAt)} · ${formatDuration(analysis.timingMs.total)}`}
+        actions={(
+          <div className="header-actions">
+            {previousVersion ? <Link className="secondary-button" to={ROUTES.compare(previousVersion.analysisId, analysis.analysisId)}><GitCompareArrows size={17} /> מה השתנה מהגרסה הקודמת</Link> : null}
+            <Link className="secondary-button" to={ROUTES.uploadVersion(analysis.contractId, analysis.analysisId)}><FilePlus2 size={17} /> הגיעה גרסה חדשה מהמשכיר</Link>
+            {analysis.markedPdf ? <button className="secondary-button" type="button" onClick={openMarkedPdf}><Download size={17} /> PDF מסומן</button> : null}
+          </div>
+        )}
+      />
       {pdfError ? <ErrorNotice message={pdfError} /> : null}
       <section className="analysis-overview">
         <ScoreCard tone="critical" value={analysis.summary.critical} label="סעיפים קריטיים" icon={AlertOctagon} />

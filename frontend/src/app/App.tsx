@@ -7,6 +7,7 @@ import { AppShell } from "../layout/AppShell";
 import { AdminLawsPage } from "../pages/AdminLawsPage";
 import { AnalysisPage } from "../pages/AnalysisPage";
 import { AuthPage } from "../pages/AuthPage";
+import { ComparePage } from "../pages/ComparePage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { HistoryPage } from "../pages/HistoryPage";
 import { LandingPage } from "../pages/LandingPage";
@@ -47,6 +48,7 @@ export function App() {
             <Route path="preferences" element={<PreferencesPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="analysis/:analysisId" element={<AnalysisPage />} />
+            <Route path="compare/:baseId/:targetId" element={<ComparePage />} />
             <Route path="admin/laws" element={<AdminRoute />} />
           </Route>
           <Route path="*" element={<NotFoundPage />} />

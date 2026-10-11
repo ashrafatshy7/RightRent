@@ -18,6 +18,10 @@ export const ROUTES = Object.freeze({
   preferences: "/app/preferences",
   history: "/app/history",
   analysis: (analysisId: string) => `/app/analysis/${analysisId}`,
+  compare: (baseAnalysisId: string, targetAnalysisId: string) => `/app/compare/${baseAnalysisId}/${targetAnalysisId}`,
+  // Uploading a revised version of a contract analyzed in `fromAnalysisId`.
+  uploadVersion: (previousContractId: string, fromAnalysisId: string) =>
+    `/app/upload?previous=${encodeURIComponent(previousContractId)}&from=${encodeURIComponent(fromAnalysisId)}`,
   adminLaws: "/app/admin/laws",
 });
 
@@ -34,6 +38,7 @@ export const API_PATHS = Object.freeze({
   costSimulation: (analysisId: string) => `/api/analyses/${analysisId}/cost-simulation`,
   financialOverrides: (analysisId: string) => `/api/analyses/${analysisId}/financial-overrides`,
   history: "/api/history",
+  comparison: (baseAnalysisId: string, targetAnalysisId: string) => `/api/comparisons/${baseAnalysisId}/${targetAnalysisId}`,
   historyItem: (analysisId: string) => `/api/history/${analysisId}`,
   readiness: "/api/health/ready",
   adminLawStatus: "/api/admin/laws/status",

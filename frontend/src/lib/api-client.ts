@@ -2,6 +2,8 @@ import { API_BASE_URL, API_PATHS } from "../config/app";
 import type {
   Analysis,
   AuthResponse,
+  ContractComparison,
+  HistoryAnalysis,
   CostInputs,
   CostScenario,
   CostSimulation,
@@ -140,14 +142,20 @@ export const api = Object.freeze({
     { method: "PUT", body: JSON.stringify(preferences) },
     token,
   ),
-  uploadContract: (token: string, file: File) => {
+  uploadContract: (token: string, file: File, previousContractId?: string) => {
     const body = new FormData();
+    if (previousContractId) body.append("previousContractId", previousContractId);
     body.append("contract", file);
     return request<{ contract: UploadedContract }>(API_PATHS.uploadContract, { method: "POST", body }, token);
   },
   analyzeContract: analyzeWithConsoleProgress,
   getAnalysis: (token: string, analysisId: string) => request<{ analysis: Analysis }>(API_PATHS.analysis(analysisId), {}, token),
-  getHistory: (token: string) => request<{ analyses: Analysis[] }>(API_PATHS.history, {}, token),
+  getHistory: (token: string) => request<{ analyses: HistoryAnalysis[] }>(API_PATHS.history, {}, token),
+  getComparison: (token: string, baseAnalysisId: string, targetAnalysisId: string) => request<{ comparison: ContractComparison }>(
+    API_PATHS.comparison(baseAnalysisId, targetAnalysisId),
+    {},
+    token,
+  ),
   simulateCost: (token: string, analysisId: string, scenario?: Partial<CostScenario>) => request<{ simulation: CostSimulation; inputs: CostInputs; cpi: CpiSnapshot }>(
     API_PATHS.costSimulation(analysisId),
     { method: "POST", body: JSON.stringify(scenario ? { scenario } : {}) },

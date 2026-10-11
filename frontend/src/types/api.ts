@@ -31,6 +31,8 @@ export type UploadedContract = {
   pageCount: number;
   clauseCount: number;
   extractionMs: number;
+  version: number;
+  previousContractId: string | null;
   uploadedAt: string;
 };
 
@@ -266,6 +268,49 @@ export type Analysis = {
     target: number;
     targetMet: boolean;
   };
+};
+
+// A history entry: the analysis with its contract's name and place in the version history.
+export type ContractVersionInfo = {
+  id: string;
+  originalFileName: string;
+  version: number;
+  rootContractId: string;
+  previousContractId: string | null;
+};
+export type HistoryAnalysis = Analysis & { contract: ContractVersionInfo | null };
+
+export type ComparisonStatus = "NEW_ISSUE" | "WORSENED" | "UNREQUESTED_CHANGE" | "STILL_OPEN" | "IMPROVED" | "FIXED" | "UNCHANGED";
+export type AlignmentChange = "UNCHANGED" | "MODIFIED" | "ADDED" | "REMOVED" | "SPLIT" | "MERGED";
+export type ComparisonSide = { clauseIds: string[]; label: string; text: string; severity: Severity | null; title: string | null };
+export type DiffPart = { op: "equal" | "insert" | "delete"; text: string };
+export type ComparisonItem = {
+  status: ComparisonStatus;
+  change: AlignmentChange;
+  moved: boolean;
+  renumberedOnly: boolean;
+  before: ComparisonSide | null;
+  after: ComparisonSide | null;
+  diff: DiffPart[] | null;
+  numberChanges: Array<{ before: string; after: string }>;
+};
+export type VersionSummary = {
+  analysisId: string;
+  contractId: string;
+  version: number;
+  fileName: string;
+  createdAt: string;
+  summary: { critical: number; warnings: number; compliant: number };
+};
+export type ContractComparison = {
+  base: VersionSummary;
+  target: VersionSummary;
+  headline: string;
+  counts: Record<ComparisonStatus, number>;
+  items: ComparisonItem[];
+  protections: Array<{ protectionId: string; title: string; before: ProtectionStatus | null; after: ProtectionStatus | null }>;
+  cost: { before: number | null; after: number | null };
+  warnings: string[];
 };
 
 export type LawSourceStatus =
