@@ -37,6 +37,9 @@ function contract(id: string, clauses: ContractClause[], version: number): Contr
   };
 }
 
+// The test contract runs 24 months; matching that keeps the comparison about the contract's changes.
+const preferences = { ...defaultPreferences, leaseLengthMonths: 24 };
+
 // The offline analysis of a contract, reduced to what a comparison reads.
 function analysis(id: string, contractRecord: ContractRecord): AnalysisRecord {
   const graph = linkClauses(contractRecord.clauses);
@@ -44,7 +47,7 @@ function analysis(id: string, contractRecord: ContractRecord): AnalysisRecord {
     const profile = graph.profiles.get(clause.id)!;
     const checks = computeDeterministicChecks(profile, graph.contractFacts);
     const verdict = deterministicVerdict(clause, {
-      preferences: defaultPreferences,
+      preferences,
       profile,
       contractFacts: graph.contractFacts,
       links: graph.links.get(clause.id)!,
@@ -55,10 +58,10 @@ function analysis(id: string, contractRecord: ContractRecord): AnalysisRecord {
   return {
     analysisId: id,
     contractId: contractRecord.id,
-    schemaVersion: "1.4.0",
+    schemaVersion: "1.5.0",
     findings,
     protectionReport: evaluateProtectionChecklistDeterministically(contractRecord.clauses),
-    preferencesSnapshot: defaultPreferences,
+    preferencesSnapshot: preferences,
     summary: { critical: 0, warnings: 0, compliant: 0 },
     createdAt: "2026-10-11T00:00:00.000Z",
   } as unknown as AnalysisRecord;

@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
-import type { ContractClause, FindingCategory, FindingTopic, TenantPreferences } from "../src/domain/models.js";
+import {
+  defaultPreferences,
+  normalizePreferences,
+  type ContractClause,
+  type FindingCategory,
+  type FindingTopic,
+  type TenantPreferences,
+} from "../src/domain/models.js";
 import { redactClauses } from "../src/modules/analyses/anonymization.service.js";
 import {
   categoryForAssessment,
@@ -281,4 +288,84 @@ test("a landlord-only early-termination right is PARTIAL, not COVERED, for the t
   const earlyTermination = protections.find((item) => item.protectionId === "RR-REC-EARLY-TERMINATION");
   assert.ok(earlyTermination);
   assert.equal(earlyTermination.status, "PARTIAL");
+});
+
+test("preferences saved before a field existed are read with its default, in one key order", () => {
+  const read = normalizePreferences({
+    maxMonthlyRentIls: 5_000,
+    repairUrgencyHours: 48,
+    leaseLengthMonths: 12,
+    maxAnnualRentIncreasePercent: 3,
+    petsRequired: true,
+    furnishedRequired: false,
+    acceptsGuarantorRequirement: false,
+  });
+  assert.deepEqual(Object.keys(read), Object.keys(defaultPreferences));
+  assert.deepEqual(read.acceptedSecurityKinds, ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE"]);
+  assert.equal(read.maxMonthlyRentIls, 5_000);
+  assert.equal(read.minEntryNoticeHours, null);
+  assert.deepEqual(
+    normalizePreferences({ acceptedSecurityKinds: ["GUARANTOR", "BANK_GUARANTEE", "GUARANTOR"] }).acceptedSecurityKinds,
+    ["BANK_GUARANTEE", "GUARANTOR"],
+  );
+});
+
+const preferenceContract = extractClausesFromPlainText([
+  "[C001]",
+  "תקופת השכירות היא 24 חודשים. דמי השכירות החודשיים הם 5,000 ש״ח.",
+  "[C002]",
+  "דמי השכירות צמודים למדד המחירים לצרכן ויעודכנו אחת לשנה.",
+  "[C003]",
+  "להבטחת התחייבויות השוכר ימסור השוכר למשכיר שטר חוב בסך 15,000 ש״ח.",
+  "[C004]",
+  "דמי התיווך בסך 5,000 ש״ח ישולמו על ידי השוכר במעמד החתימה.",
+  "[C005]",
+  "השוכר לא יהיה רשאי לסיים את השכירות לפני תום התקופה.",
+  "[C006]",
+  "אין לשוכר אופציה להאריך את השכירות.",
+  "[C007]",
+  "השוכר לא ישכיר את הדירה בשכירות משנה ולא יכניס לדירה דיירים נוספים.",
+  "[C008]",
+  "המשכיר רשאי להיכנס לדירה לאחר תיאום והודעה מראש של 12 שעות.",
+  "[C009]",
+  "המשכיר יתקן ליקוי דחוף המונע מגורים סבירים בדירה בתוך שלושה ימים ממועד קבלת הודעת השוכר.",
+  "[C010]",
+  "להבטחת התחייבויות השוכר ימסור השוכר ערבות בנקאית או שטר חוב, לבחירת השוכר.",
+].join("\n"));
+
+test("each preference flags the clause that conflicts with it, and only that clause", () => {
+  const strict: TenantPreferences = {
+    ...defaultPreferences,
+    repairUrgencyHours: 48,
+    acceptedSecurityKinds: ["BANK_GUARANTEE"],
+    acceptsIndexation: false,
+    earlyExitRequired: true,
+    roommatesRequired: true,
+    renewalOptionRequired: true,
+    minEntryNoticeHours: 24,
+    acceptsBrokerFee: false,
+  };
+  const expectedTopics: Record<string, FindingTopic> = {
+    C001: "rent_and_term",
+    C002: "rent_and_term",
+    C003: "guarantee_security",
+    C004: "charges_payments",
+    C005: "termination_renewal",
+    C006: "termination_renewal",
+    C007: "pets_and_use",
+    C008: "entry_privacy",
+    C009: "repairs_maintenance",
+  };
+  for (const { clauseId, verdict } of analyzeOffline(preferenceContract, strict).verdicts) {
+    const topic = expectedTopics[clauseId];
+    assert.equal(categoryForAssessment(verdict.legalAssessment), topic ? "tenant_preference" : "informational", clauseId);
+    if (topic) assert.equal(verdict.topic, topic, clauseId);
+  }
+});
+
+test("permissive preferences leave the same clauses without a preference conflict", () => {
+  const permissive = { ...defaultPreferences, leaseLengthMonths: 24 };
+  for (const { clauseId, verdict } of analyzeOffline(preferenceContract, permissive).verdicts) {
+    assert.equal(verdict.legalAssessment.preferenceConflict, false, clauseId);
+  }
 });

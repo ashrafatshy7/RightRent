@@ -74,7 +74,16 @@ export type CostSimulation = {
   };
   baselineTotal: number;
   security: { total: number; cashLocked: number; returnDays: number | null };
-  budget: { maxMonthlyRentIls: number; peakMonthlyRent: number; firstMonthOverBudget: number | null };
+  // The rent budget, and the total budget for rent plus the tenant's recurring charges with a known
+  // amount (null when the tenant set none).
+  budget: {
+    maxMonthlyRentIls: number;
+    peakMonthlyRent: number;
+    firstMonthOverBudget: number | null;
+    maxMonthlyTotalCostIls: number | null;
+    peakMonthlyTotal: number;
+    firstMonthOverTotalBudget: number | null;
+  };
   increase: { effectiveAnnualPercent: number; preferenceMax: number; exceedsPreference: boolean };
   lines: CostLine[];
   notes: string[];
@@ -215,7 +224,14 @@ export function simulateCost(inputs: CostInputs, scenario: CostScenario, prefere
     totals: { rent: 0, increases: 0, indexation: 0, charges: 0, oneTime: 0, penalties: 0, total: 0, averageMonthly: 0 },
     baselineTotal: 0,
     security: securitySummary(inputs),
-    budget: { maxMonthlyRentIls: preferences.maxMonthlyRentIls, peakMonthlyRent: 0, firstMonthOverBudget: null },
+    budget: {
+      maxMonthlyRentIls: preferences.maxMonthlyRentIls,
+      peakMonthlyRent: 0,
+      firstMonthOverBudget: null,
+      maxMonthlyTotalCostIls: preferences.maxMonthlyTotalCostIls,
+      peakMonthlyTotal: 0,
+      firstMonthOverTotalBudget: null,
+    },
     increase: { effectiveAnnualPercent: 0, preferenceMax: preferences.maxAnnualRentIncreasePercent, exceedsPreference: false },
     lines: [],
     notes: [],
@@ -229,6 +245,10 @@ export function simulateCost(inputs: CostInputs, scenario: CostScenario, prefere
   const monthlyRents = occupied.map((month) => month.baseRent + month.increase + month.indexation);
   const peakMonthlyRent = Math.max(0, ...monthlyRents);
   const overBudget = occupied.find((month) => month.baseRent + month.increase + month.indexation > preferences.maxMonthlyRentIls + 0.005);
+  const monthlyTotal = (month: CostMonth) => month.baseRent + month.increase + month.indexation + month.charges;
+  const peakMonthlyTotal = Math.max(0, ...occupied.map(monthlyTotal));
+  const maxTotal = preferences.maxMonthlyTotalCostIls;
+  const overTotalBudget = maxTotal === null ? undefined : occupied.find((month) => monthlyTotal(month) > maxTotal + 0.005);
   const span = Math.min(13, monthlyRents.length);
   const effectiveAnnualPercent = span > 1
     ? round(((monthlyRents[span - 1]! / monthlyRents[0]!) ** (12 / (span - 1)) - 1) * 100)
@@ -245,6 +265,9 @@ export function simulateCost(inputs: CostInputs, scenario: CostScenario, prefere
       maxMonthlyRentIls: preferences.maxMonthlyRentIls,
       peakMonthlyRent: round(peakMonthlyRent),
       firstMonthOverBudget: overBudget?.month ?? null,
+      maxMonthlyTotalCostIls: maxTotal,
+      peakMonthlyTotal: round(peakMonthlyTotal),
+      firstMonthOverTotalBudget: overTotalBudget?.month ?? null,
     },
     increase: {
       effectiveAnnualPercent,

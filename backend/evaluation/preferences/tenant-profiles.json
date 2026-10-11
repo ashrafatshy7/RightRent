@@ -11,7 +11,15 @@
       "maxAnnualRentIncreasePercent": 5,
       "petsRequired": false,
       "furnishedRequired": false,
-      "acceptsGuarantorRequirement": true
+      "acceptedSecurityKinds": ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"],
+      "maxMonthlyTotalCostIls": null,
+      "acceptsIndexation": true,
+      "earlyExitRequired": false,
+      "roommatesRequired": false,
+      "renewalOptionRequired": false,
+      "minEntryNoticeHours": null,
+      "acceptsBrokerFee": true,
+      "additionalNotes": ""
     },
     {
       "id": "PREF-PET-OWNER",
@@ -22,7 +30,15 @@
       "maxAnnualRentIncreasePercent": 5,
       "petsRequired": true,
       "furnishedRequired": false,
-      "acceptsGuarantorRequirement": true
+      "acceptedSecurityKinds": ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"],
+      "maxMonthlyTotalCostIls": null,
+      "acceptsIndexation": true,
+      "earlyExitRequired": false,
+      "roommatesRequired": false,
+      "renewalOptionRequired": false,
+      "minEntryNoticeHours": null,
+      "acceptsBrokerFee": true,
+      "additionalNotes": ""
     }
   ]
 }

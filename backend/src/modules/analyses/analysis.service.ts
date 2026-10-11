@@ -57,7 +57,7 @@ import {
 // The schema/logic version behind AnalysisResult and Finding, folded into analysisInputHash below
 // so that a change here always produces a fresh analysis instead of returning a previously saved
 // record in the old shape (see findAnalysisByInput).
-const ANALYSIS_SCHEMA_VERSION = "1.4.0";
+const ANALYSIS_SCHEMA_VERSION = "1.5.0";
 
 type RetrievedReference = {
   id: string;

@@ -146,6 +146,22 @@ test("the cost of a plain lease is rent and known charges, month by month", () =
   assert.equal(simulation.totals.total, 75_000);
   assert.equal(simulation.months.at(-1)?.cumulative, 75_000);
   assert.equal(simulation.budget.firstMonthOverBudget, null);
+  assert.equal(simulation.budget.firstMonthOverTotalBudget, null);
+});
+
+test("the total budget counts the rent together with the tenant's known charges", () => {
+  const inputs = costInputs(termsForText([
+    "[C001]",
+    "תקופת השכירות היא 12 חודשים. דמי השכירות החודשיים הם 6,000 ש״ח.",
+    "[C002]",
+    "השוכר ישלם לוועד הבית סך של 250 ש״ח לחודש.",
+  ]));
+  const over = simulateCost(inputs, stay, { ...defaultPreferences, maxMonthlyTotalCostIls: 6_200 });
+  assert.equal(over.budget.firstMonthOverBudget, null);
+  assert.equal(over.budget.peakMonthlyTotal, 6_250);
+  assert.equal(over.budget.firstMonthOverTotalBudget, 1);
+  const within = simulateCost(inputs, stay, { ...defaultPreferences, maxMonthlyTotalCostIls: 6_250 });
+  assert.equal(within.budget.firstMonthOverTotalBudget, null);
 });
 
 test("annual CPI linkage raises the rent once a year and never below the base with a floor", () => {

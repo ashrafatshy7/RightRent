@@ -149,9 +149,10 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
         <div className="cost-empty"><Info size={20} /><p>כדי לחשב את העלות חסרים {simulation.missing.map((field) => (field === "monthlyRent" ? "דמי השכירות החודשיים" : "משך תקופת השכירות")).join(" ו")}. אפשר להזין אותם בטבלה למטה.</p></div>
       )}
 
-      {simulation.budget.firstMonthOverBudget !== null || simulation.increase.exceedsPreference ? (
+      {simulation.budget.firstMonthOverBudget !== null || simulation.budget.firstMonthOverTotalBudget !== null || simulation.increase.exceedsPreference ? (
         <div className="cost-alerts">
           {simulation.budget.firstMonthOverBudget !== null ? <p><AlertTriangle size={16} /> בחודש {simulation.budget.firstMonthOverBudget} דמי השכירות יגיעו ל־{formatCurrency(simulation.budget.peakMonthlyRent)} ויעברו את התקציב שהגדרתם ({formatCurrency(simulation.budget.maxMonthlyRentIls)}).</p> : null}
+          {simulation.budget.firstMonthOverTotalBudget !== null && simulation.budget.maxMonthlyTotalCostIls !== null ? <p><AlertTriangle size={16} /> בחודש {simulation.budget.firstMonthOverTotalBudget} שכר הדירה והתשלומים השוטפים יגיעו ל־{formatCurrency(simulation.budget.peakMonthlyTotal)} ויעברו את התקציב החודשי הכולל שהגדרתם ({formatCurrency(simulation.budget.maxMonthlyTotalCostIls)}).</p> : null}
           {simulation.increase.exceedsPreference ? <p><AlertTriangle size={16} /> העלייה השנתית בפועל היא {formatNumber(simulation.increase.effectiveAnnualPercent)}%, יותר מ־{formatNumber(simulation.increase.preferenceMax)}% שהגדרתם בהעדפות.</p> : null}
         </div>
       ) : null}

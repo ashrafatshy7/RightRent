@@ -36,7 +36,7 @@ const NAMED_DATE = new RegExp(`(\\d{1,2})\\s+ב?(${MONTH_NAMES})\\s+(\\d{4})`, "
 const NUMERIC_DATE = /(?<!\d)(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?!\d)/u;
 const START_MARKER = /(?:מיום|החל\s+מ|מתאריך|תחילת\s+(?:ה)?(?:שכירות|תקופה))/u;
 
-const TENANT_PAYS = /השוכר(?:ת)?\s+(?:ישלם|תשלם|יישא|תישא|ישא|תשא|אחראי|אחראית)|על\s+(?:חשבון\s+)?השוכר|יחולו\s+על\s+השוכר|ישולמו\s+על\s+ידי\s+השוכר/u;
+export const TENANT_PAYS = /השוכר(?:ת)?\s+(?:ישלם|תשלם|יישא|תישא|ישא|תשא|אחראי|אחראית)|על\s+(?:חשבון\s+)?השוכר|יחולו\s+על\s+השוכר|ישולמו\s+על\s+ידי\s+השוכר/u;
 const LANDLORD_PAYS = /(?:המשכיר|המשכירה|בעל(?:ת)?\s+הדירה)\s+(?:ישלם|תשלם|יישא|תישא|ישא|תשא|אחראי|אחראית)|על\s+(?:חשבון\s+)?(?:המשכיר|בעל(?:ת)?\s+הדירה)|יחולו\s+על\s+(?:המשכיר|בעל(?:ת)?\s+הדירה)/u;
 
 const CHARGE_TERMS: Array<{ kind: ChargeKind; pattern: RegExp; name: string }> = [
@@ -56,7 +56,7 @@ const ONE_TIME_TERMS: Array<{ kind: OneTimeCostKind; pattern: RegExp; timing: "S
   { kind: "CLEANING", pattern: term("ניקיון|ניקוי"), timing: "END" },
 ];
 
-const SECURITY_KINDS: Array<{ kind: SecurityKind; pattern: RegExp }> = [
+export const SECURITY_KINDS: Array<{ kind: SecurityKind; pattern: RegExp }> = [
   { kind: "BANK_GUARANTEE", pattern: /ערבות\s+בנקאית|bank\s+guarantee/iu },
   { kind: "PROMISSORY_NOTE", pattern: /שטר\s+חוב/u },
   { kind: "CASH_DEPOSIT", pattern: /פיקדון|פקדון|deposit/iu },
@@ -124,7 +124,7 @@ function tenantNoticeDays(sentence: string) {
   return (days.find((duration) => tenantAt >= 0 && duration.index > tenantAt) ?? days[0])?.value ?? null;
 }
 
-function earlyExitTerms(sentence: string): { kind: EarlyExitKind; months: number | null; amount: number | null; noticeDays: number | null } | null {
+export function earlyExitTerms(sentence: string): { kind: EarlyExitKind; months: number | null; amount: number | null; noticeDays: number | null } | null {
   const notice = tenantNoticeDays(sentence);
   const replacement = REPLACEMENT.test(sentence) && !NO_REPLACEMENT.test(sentence);
   if (PAYS_UNTIL_END.test(sentence)) return { kind: "UNTIL_END", months: null, amount: null, noticeDays: null };
