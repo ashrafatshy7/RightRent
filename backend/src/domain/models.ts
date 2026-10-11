@@ -1,13 +1,32 @@
 export type Severity = "RED" | "ORANGE" | "OK";
 
+// The kinds of security a tenant can agree to give; "OTHER" is only ever read from a contract.
+export const ACCEPTED_SECURITY_KINDS = ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"] as const;
+export type AcceptedSecurityKind = (typeof ACCEPTED_SECURITY_KINDS)[number];
+export const ADDITIONAL_NOTES_MAX_LENGTH = 500;
+
 export type TenantPreferences = {
   maxMonthlyRentIls: number;
+  // The longest acceptable time to fix an urgent defect.
   repairUrgencyHours: 24 | 48 | 72 | 168;
   leaseLengthMonths: number;
   maxAnnualRentIncreasePercent: number;
   petsRequired: boolean;
   furnishedRequired: boolean;
-  acceptsGuarantorRequirement: boolean;
+  // The only kinds of security the tenant agrees to give.
+  acceptedSecurityKinds: AcceptedSecurityKind[];
+  // Rent plus the recurring charges the tenant pays (arnona, vaad bayit, ...); null when not set.
+  maxMonthlyTotalCostIls: number | null;
+  acceptsIndexation: boolean;
+  earlyExitRequired: boolean;
+  // Bringing in a roommate or subletting.
+  roommatesRequired: boolean;
+  renewalOptionRequired: boolean;
+  // The least notice the landlord must give before entering; null when it does not matter.
+  minEntryNoticeHours: 24 | 48 | null;
+  acceptsBrokerFee: boolean;
+  // Anything else the tenant cares about, in their own words; read only by Claude.
+  additionalNotes: string;
 };
 
 export const defaultPreferences: TenantPreferences = {
@@ -17,8 +36,32 @@ export const defaultPreferences: TenantPreferences = {
   maxAnnualRentIncreasePercent: 5,
   petsRequired: false,
   furnishedRequired: false,
-  acceptsGuarantorRequirement: true,
+  acceptedSecurityKinds: [...ACCEPTED_SECURITY_KINDS],
+  maxMonthlyTotalCostIls: null,
+  acceptsIndexation: true,
+  earlyExitRequired: false,
+  roommatesRequired: false,
+  renewalOptionRequired: false,
+  minEntryNoticeHours: null,
+  acceptsBrokerFee: true,
+  additionalNotes: "",
 };
+
+type StoredPreferences = Partial<TenantPreferences> & { acceptsGuarantorRequirement?: boolean };
+
+// Preferences saved before a field existed lack it, and older ones say acceptsGuarantorRequirement
+// instead of acceptedSecurityKinds. Every saved set is read through this, always in the same key
+// order, so two equal sets also hash and compare equal (see analysisInputHash and compareVersions).
+export function normalizePreferences(stored: StoredPreferences = {}): TenantPreferences {
+  const { acceptsGuarantorRequirement, ...current } = stored;
+  const merged: TenantPreferences = { ...defaultPreferences, ...current };
+  const kinds = current.acceptedSecurityKinds
+    ?? ACCEPTED_SECURITY_KINDS.filter((kind) => kind !== "GUARANTOR" || acceptsGuarantorRequirement !== false);
+  const ordered = Object.fromEntries(
+    (Object.keys(defaultPreferences) as Array<keyof TenantPreferences>).map((key) => [key, merged[key]]),
+  ) as TenantPreferences;
+  return { ...ordered, acceptedSecurityKinds: ACCEPTED_SECURITY_KINDS.filter((kind) => kinds.includes(kind)) };
+}
 
 export type UserRecord = {
   id: string;
@@ -280,7 +323,7 @@ export type FinancialOverrides = {
 };
 
 export type AnalysisResult = {
-  schemaVersion: "1.4.0";
+  schemaVersion: "1.5.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";

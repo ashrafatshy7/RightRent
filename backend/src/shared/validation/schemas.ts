@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ACCEPTED_SECURITY_KINDS, ADDITIONAL_NOTES_MAX_LENGTH, normalizePreferences } from "../../domain/models.js";
 
 export const credentialsSchema = z.object({
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
@@ -12,8 +13,16 @@ export const preferencesSchema = z.object({
   maxAnnualRentIncreasePercent: z.number().nonnegative().max(100),
   petsRequired: z.boolean(),
   furnishedRequired: z.boolean(),
-  acceptsGuarantorRequirement: z.boolean(),
-}).strict();
+  acceptedSecurityKinds: z.array(z.enum(ACCEPTED_SECURITY_KINDS)).max(ACCEPTED_SECURITY_KINDS.length),
+  maxMonthlyTotalCostIls: z.number().nonnegative().max(1_000_000).nullable(),
+  acceptsIndexation: z.boolean(),
+  earlyExitRequired: z.boolean(),
+  roommatesRequired: z.boolean(),
+  renewalOptionRequired: z.boolean(),
+  minEntryNoticeHours: z.union([z.literal(24), z.literal(48)]).nullable(),
+  acceptsBrokerFee: z.boolean(),
+  additionalNotes: z.string().trim().max(ADDITIONAL_NOTES_MAX_LENGTH),
+}).strict().transform((preferences) => normalizePreferences(preferences));
 
 export const analyzeRequestSchema = z.object({
   confirmPreferences: z.literal(true),

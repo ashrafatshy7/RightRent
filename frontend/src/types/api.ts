@@ -1,5 +1,7 @@
 export type UserRole = "TENANT" | "ADMIN";
 
+export type AcceptedSecurityKind = "BANK_GUARANTEE" | "CASH_DEPOSIT" | "PROMISSORY_NOTE" | "GUARANTOR";
+
 export type TenantPreferences = {
   maxMonthlyRentIls: number;
   repairUrgencyHours: 24 | 48 | 72 | 168;
@@ -7,7 +9,15 @@ export type TenantPreferences = {
   maxAnnualRentIncreasePercent: number;
   petsRequired: boolean;
   furnishedRequired: boolean;
-  acceptsGuarantorRequirement: boolean;
+  acceptedSecurityKinds: AcceptedSecurityKind[];
+  maxMonthlyTotalCostIls: number | null;
+  acceptsIndexation: boolean;
+  earlyExitRequired: boolean;
+  roommatesRequired: boolean;
+  renewalOptionRequired: boolean;
+  minEntryNoticeHours: 24 | 48 | null;
+  acceptsBrokerFee: boolean;
+  additionalNotes: string;
 };
 
 export type PublicUser = {
@@ -208,7 +218,14 @@ export type CostSimulation = {
   totals: { rent: number; increases: number; indexation: number; charges: number; oneTime: number; penalties: number; total: number; averageMonthly: number };
   baselineTotal: number;
   security: { total: number; cashLocked: number; returnDays: number | null };
-  budget: { maxMonthlyRentIls: number; peakMonthlyRent: number; firstMonthOverBudget: number | null };
+  budget: {
+    maxMonthlyRentIls: number;
+    peakMonthlyRent: number;
+    firstMonthOverBudget: number | null;
+    maxMonthlyTotalCostIls: number | null;
+    peakMonthlyTotal: number;
+    firstMonthOverTotalBudget: number | null;
+  };
   increase: { effectiveAnnualPercent: number; preferenceMax: number; exceedsPreference: boolean };
   lines: CostLine[];
   notes: string[];

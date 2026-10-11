@@ -12,9 +12,19 @@ import type {
   TenantPreferences,
   UserRecord,
 } from "../../domain/models.js";
+import { normalizePreferences } from "../../domain/models.js";
 
 // A staged candidate can be approved whether or not an official change accounts for it.
 const APPROVABLE_LAW_STATUSES: LawSourceStatus[] = ["AWAITING_VERIFICATION", "WIKISOURCE_CHANGED"];
+
+// Users and analyses saved before a preference existed are read with its default.
+function readUser<T extends UserRecord>(user: T | null): T | null {
+  return user && { ...user, preferences: normalizePreferences(user.preferences) };
+}
+
+function readAnalysis<T extends AnalysisRecord>(analysis: T | null): T | null {
+  return analysis && { ...analysis, preferencesSnapshot: normalizePreferences(analysis.preferencesSnapshot) };
+}
 
 export interface DataStore {
   close(): Promise<void>;
@@ -91,11 +101,11 @@ export class MemoryDataStore implements DataStore {
   }
 
   async findUserByEmail(email: string) {
-    return structuredClone([...this.users.values()].find((user) => user.email === email) ?? null);
+    return readUser(structuredClone([...this.users.values()].find((user) => user.email === email) ?? null));
   }
 
   async findUserById(id: string) {
-    return structuredClone(this.users.get(id) ?? null);
+    return readUser(structuredClone(this.users.get(id) ?? null));
   }
 
   async updateUserPreferences(id: string, preferences: TenantPreferences) {
@@ -107,7 +117,7 @@ export class MemoryDataStore implements DataStore {
       updatedAt: new Date().toISOString(),
     };
     this.users.set(id, updated);
-    return structuredClone(updated);
+    return readUser(structuredClone(updated));
   }
 
   async createContract(contract: ContractRecord) {
@@ -139,14 +149,14 @@ export class MemoryDataStore implements DataStore {
   }
 
   async getAnalysis(id: string) {
-    return structuredClone(this.analyses.get(id) ?? null);
+    return readAnalysis(structuredClone(this.analyses.get(id) ?? null));
   }
 
   async findAnalysisByInput(contractId: string, analysisInputHash: string) {
-    return structuredClone(
+    return readAnalysis(structuredClone(
       [...this.analyses.values()].find((item) =>
         item.contractId === contractId && item.analysisInputHash === analysisInputHash) ?? null,
-    );
+    ));
   }
 
   async countAnalysesByContract(contractId: string) {
@@ -157,7 +167,7 @@ export class MemoryDataStore implements DataStore {
     return [...this.analyses.values()]
       .filter((analysis) => analysis.userId === userId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .map((analysis) => structuredClone(analysis));
+      .map((analysis) => readAnalysis(structuredClone(analysis))!);
   }
 
   async deleteAnalysis(id: string) {
@@ -406,17 +416,17 @@ class MongoDataStore implements DataStore {
     await this.collection<UserRecord>("users").insertOne(user);
   }
   async findUserByEmail(email: string) {
-    return this.collection<UserRecord>("users").findOne({ email });
+    return readUser(await this.collection<UserRecord>("users").findOne({ email }));
   }
   async findUserById(id: string) {
-    return this.collection<UserRecord>("users").findOne({ id });
+    return readUser(await this.collection<UserRecord>("users").findOne({ id }));
   }
   async updateUserPreferences(id: string, preferences: TenantPreferences) {
-    return this.collection<UserRecord>("users").findOneAndUpdate(
+    return readUser(await this.collection<UserRecord>("users").findOneAndUpdate(
       { id },
       { $set: { preferences, updatedAt: new Date().toISOString() } },
       { returnDocument: "after" },
-    );
+    ));
   }
   async createContract(contract: ContractRecord) {
     await this.collection<ContractRecord>("contracts").insertOne(contract);
@@ -440,19 +450,19 @@ class MongoDataStore implements DataStore {
     await this.collection<AnalysisRecord>("analyses").insertOne(analysis);
   }
   async getAnalysis(id: string) {
-    return this.collection<AnalysisRecord>("analyses").findOne({ analysisId: id });
+    return readAnalysis(await this.collection<AnalysisRecord>("analyses").findOne({ analysisId: id }));
   }
   async findAnalysisByInput(contractId: string, analysisInputHash: string) {
-    return this.collection<AnalysisRecord>("analyses").findOne({ contractId, analysisInputHash });
+    return readAnalysis(await this.collection<AnalysisRecord>("analyses").findOne({ contractId, analysisInputHash }));
   }
   async countAnalysesByContract(contractId: string) {
     return this.collection<AnalysisRecord>("analyses").countDocuments({ contractId });
   }
   async listAnalyses(userId: string) {
-    return this.collection<AnalysisRecord>("analyses")
+    return (await this.collection<AnalysisRecord>("analyses")
       .find({ userId })
       .sort({ createdAt: -1 })
-      .toArray();
+      .toArray()).map((analysis) => readAnalysis(analysis)!);
   }
   async deleteAnalysis(id: string) {
     return (await this.collection<AnalysisRecord>("analyses").deleteOne({ analysisId: id }))

@@ -23,7 +23,15 @@
           "maxAnnualRentIncreasePercent",
           "petsRequired",
           "furnishedRequired",
-          "acceptsGuarantorRequirement"
+          "acceptedSecurityKinds",
+          "maxMonthlyTotalCostIls",
+          "acceptsIndexation",
+          "earlyExitRequired",
+          "roommatesRequired",
+          "renewalOptionRequired",
+          "minEntryNoticeHours",
+          "acceptsBrokerFee",
+          "additionalNotes"
         ],
         "properties": {
           "id": { "type": "string", "pattern": "^PREF-[A-Z-]+$" },
@@ -34,7 +42,19 @@
           "maxAnnualRentIncreasePercent": { "type": "number", "minimum": 0 },
           "petsRequired": { "type": "boolean" },
           "furnishedRequired": { "type": "boolean" },
-          "acceptsGuarantorRequirement": { "type": "boolean" }
+          "acceptedSecurityKinds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "enum": ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"] }
+          },
+          "maxMonthlyTotalCostIls": { "type": ["number", "null"], "minimum": 0 },
+          "acceptsIndexation": { "type": "boolean" },
+          "earlyExitRequired": { "type": "boolean" },
+          "roommatesRequired": { "type": "boolean" },
+          "renewalOptionRequired": { "type": "boolean" },
+          "minEntryNoticeHours": { "enum": [24, 48, null] },
+          "acceptsBrokerFee": { "type": "boolean" },
+          "additionalNotes": { "type": "string", "maxLength": 500 }
         }
       }
     }

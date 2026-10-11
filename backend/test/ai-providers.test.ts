@@ -29,7 +29,15 @@ const preferences: TenantPreferences = {
   maxAnnualRentIncreasePercent: 5,
   petsRequired: false,
   furnishedRequired: false,
-  acceptsGuarantorRequirement: true,
+  acceptedSecurityKinds: ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"],
+  maxMonthlyTotalCostIls: null,
+  acceptsIndexation: true,
+  earlyExitRequired: false,
+  roommatesRequired: false,
+  renewalOptionRequired: false,
+  minEntryNoticeHours: null,
+  acceptsBrokerFee: true,
+  additionalNotes: "",
 };
 const hebrewVerdict = {
   title: "כותרת",

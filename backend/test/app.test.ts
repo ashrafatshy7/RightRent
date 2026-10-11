@@ -179,7 +179,15 @@ test("tenant preferences can be updated and retrieved", async () => {
     maxAnnualRentIncreasePercent: 4,
     petsRequired: true,
     furnishedRequired: false,
-    acceptsGuarantorRequirement: true,
+    acceptedSecurityKinds: ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"],
+    maxMonthlyTotalCostIls: null,
+    acceptsIndexation: true,
+    earlyExitRequired: false,
+    roommatesRequired: false,
+    renewalOptionRequired: false,
+    minEntryNoticeHours: null,
+    acceptsBrokerFee: true,
+    additionalNotes: "",
   };
   const update = await fetch(`${baseUrl}/api/users/preferences`, authenticated({
     method: "PUT",
@@ -393,7 +401,15 @@ test("analysis cache includes the confirmed preference snapshot", async () => {
     maxAnnualRentIncreasePercent: 4,
     petsRequired: true,
     furnishedRequired: false,
-    acceptsGuarantorRequirement: true,
+    acceptedSecurityKinds: ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR"],
+    maxMonthlyTotalCostIls: null,
+    acceptsIndexation: true,
+    earlyExitRequired: false,
+    roommatesRequired: false,
+    renewalOptionRequired: false,
+    minEntryNoticeHours: null,
+    acceptsBrokerFee: true,
+    additionalNotes: "",
   };
   const changed = await fetch(`${baseUrl}/api/contracts/${contractId}/analyze`, authenticated({
     method: "POST",
