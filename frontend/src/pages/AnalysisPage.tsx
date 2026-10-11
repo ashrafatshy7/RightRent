@@ -18,7 +18,7 @@ import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { api, messageForError } from "../lib/api-client";
-import { formatCurrency, formatDate, formatDuration, formatNumber } from "../lib/format";
+import { clauseLabel, formatCurrency, formatDate, formatDuration, formatNumber } from "../lib/format";
 import type { Analysis, DeterministicCheck, Finding, FindingCategory, Severity } from "../types/api";
 
 const severityMeta: Record<Severity, { label: string; tone: string; icon: typeof AlertOctagon }> = {
@@ -175,7 +175,7 @@ function FindingCard({ finding, findingsByClauseId }: { finding: Finding; findin
       <div className="finding-marker"><Icon size={20} /></div>
       <div className="finding-body">
         <header>
-          <div><span>{finding.clauseId}</span><h3>{finding.title}</h3></div>
+          <div><span>{clauseLabel(finding)}</span><h3>{finding.title}</h3></div>
           <div className="finding-badges">
             <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
             {finding.severity !== "OK" && finding.category ? <span className="finding-category-chip">{categoryMeta[finding.category]}</span> : null}

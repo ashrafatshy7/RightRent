@@ -78,6 +78,8 @@ export type ClauseLocation = { page: number; bbox: [number, number, number, numb
 
 export type Finding = {
   clauseId: string;
+  sectionLabel?: string;
+  heading?: string;
   severity: Severity;
   category: FindingCategory;
   topic: FindingTopic;
@@ -111,7 +113,7 @@ export type Protection = {
 };
 
 export type Analysis = {
-  schemaVersion: "1.1.0";
+  schemaVersion: string;
   analysisId: string;
   contractId: string;
   status: "COMPLETED";

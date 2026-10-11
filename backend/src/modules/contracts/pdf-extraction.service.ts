@@ -5,12 +5,12 @@ import { env } from "../../config/env.js";
 import type { ClauseLocation, ContractClause } from "../../domain/models.js";
 import { HttpError } from "../../shared/http/http-error.js";
 
-type LocatedLine = {
+export type LocatedLine = {
   text: string;
   locations: ClauseLocation[];
 };
 
-type PdfTextItem = {
+export type PdfTextItem = {
   str: string;
   transform: number[];
   width: number;
@@ -38,12 +38,27 @@ function locationsForLines(lines: LocatedLine[]) {
   return lines.flatMap((line) => line.locations);
 }
 
-function chunkGroup(group: { id: string; lines: LocatedLine[] }): ContractClause[] {
+type ClauseGroup = {
+  id: string;
+  lines: LocatedLine[];
+  sectionLabel?: string;
+  heading?: string;
+};
+
+function groupLabels(group: ClauseGroup) {
+  return {
+    ...(group.sectionLabel ? { sectionLabel: group.sectionLabel } : {}),
+    ...(group.heading ? { heading: group.heading } : {}),
+  };
+}
+
+function chunkGroup(group: ClauseGroup): ContractClause[] {
   if (wordCount(group.lines.map((line) => line.text).join(" ")) <= MAX_CHUNK_WORDS) {
     return [{
       id: group.id,
       text: group.lines.map((line) => line.text).join("\n").trim(),
       locations: locationsForLines(group.lines),
+      ...groupLabels(group),
     }];
   }
 
@@ -76,7 +91,18 @@ function chunkGroup(group: { id: string; lines: LocatedLine[] }): ContractClause
     id: `${group.id}-P${index + 1}`,
     text: lines.map((line) => line.text).join("\n").trim(),
     locations: locationsForLines(lines),
+    ...groupLabels(group),
   }));
+}
+
+const HEADING_MAX_WORDS = 7;
+
+// The rest of a numbered line counts as a heading ("9. בטוחות") only when it reads like one: short
+// and not ending as a sentence. "5. דמי השכירות הם 6,000 ש״ח." is the clause itself, not a title.
+function headingText(rest: string) {
+  const text = rest.trim();
+  if (!text || /[.:;,]$/u.test(text) || wordCount(text) > HEADING_MAX_WORDS) return undefined;
+  return text;
 }
 
 function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
@@ -84,8 +110,8 @@ function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
 
   const explicitMarker = /^\s*\[(C\d{3})\]\s*$/;
   const numberedHeading = /^\s*(?:סעיף\s+)?(\d+(?:\.\d+)*)[.)\-:\s]+/;
-  const groups: Array<{ id: string; lines: LocatedLine[] }> = [];
-  let current: { id: string; lines: LocatedLine[] } | undefined;
+  const groups: ClauseGroup[] = [];
+  let current: ClauseGroup | undefined;
 
   for (const line of lines) {
     const marker = explicitMarker.exec(line.text);
@@ -103,6 +129,11 @@ function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
       current = { id: `C${String(groups.length + 1).padStart(3, "0")}`, lines: [] };
       groups.push(current);
     }
+    if (heading?.[1] && !current.lines.length) {
+      current.sectionLabel = heading[1];
+      const title = headingText(line.text.slice(heading[0].length));
+      if (title) current.heading = title;
+    }
     current.lines.push(line);
   }
 
@@ -111,14 +142,44 @@ function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
     .flatMap(chunkGroup);
 }
 
-function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
+// Two consecutive items are one word when the horizontal distance between their boxes is below
+// this fraction of the font size (a word space is roughly a quarter of it), and start a new line
+// when their baselines are more than half the font size apart.
+const SAME_WORD_GAP_EM = 0.15;
+const NEW_LINE_BASELINE_EM = 0.5;
+
+function unionBox(
+  [leftX, leftY, leftWidth, leftHeight]: ClauseLocation["bbox"],
+  [rightX, rightY, rightWidth, rightHeight]: ClauseLocation["bbox"],
+): ClauseLocation["bbox"] {
+  const x = Math.min(leftX, rightX);
+  const y = Math.min(leftY, rightY);
+  return [
+    x,
+    y,
+    Math.max(leftX + leftWidth, rightX + rightWidth) - x,
+    Math.max(leftY + leftHeight, rightY + rightHeight) - y,
+  ];
+}
+
+// Some PDF producers place every Hebrew glyph as its own text item. Joining items with a space then
+// turns "חוזה" into "ח ו ז ה", and every text rule downstream (deterministic legal checks, the
+// protection checklist, quote matching) silently stops matching. Whether an item continues the
+// previous word is therefore decided from geometry, not from item boundaries. The distance is taken
+// in whichever direction the boxes are apart, since Hebrew advances right to left and numbers left
+// to right, often on the same line.
+export function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
   const lines: LocatedLine[] = [];
-  let current: { texts: string[]; locations: ClauseLocation[] } = { texts: [], locations: [] };
+  let words: string[] = [];
+  let locations: ClauseLocation[] = [];
+  let previous: { left: number; right: number; y: number; size: number } | null = null;
 
   function flush() {
-    const text = current.texts.join(" ").replace(/\s+/gu, " ").trim();
-    if (text) lines.push({ text, locations: current.locations });
-    current = { texts: [], locations: [] };
+    const text = words.join(" ").replace(/\s+/gu, " ").trim();
+    if (text) lines.push({ text, locations });
+    words = [];
+    locations = [];
+    previous = null;
   }
 
   for (const item of items) {
@@ -126,14 +187,25 @@ function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
       if (item.hasEOL) flush();
       continue;
     }
-    const scaleY = item.transform[3] ?? item.height;
+    const size = Math.max(Math.abs(item.transform[3] ?? 0), item.height, 1);
     const x = item.transform[4] ?? 0;
     const y = item.transform[5] ?? 0;
-    current.texts.push(item.str);
-    current.locations.push({
-      page,
-      bbox: [x, y, Math.max(item.width, 1), Math.max(Math.abs(scaleY), item.height, 1)],
-    });
+    const width = Math.max(item.width, 1);
+    const box: ClauseLocation["bbox"] = [x, y, width, size];
+
+    if (previous && Math.abs(y - previous.y) > NEW_LINE_BASELINE_EM * Math.max(size, previous.size)) flush();
+    const gap = previous
+      ? Math.max(x - previous.right, previous.left - (x + width))
+      : Number.POSITIVE_INFINITY;
+    if (previous && gap < SAME_WORD_GAP_EM * Math.max(size, previous.size)) {
+      words[words.length - 1] += item.str;
+      const last = locations[locations.length - 1]!;
+      last.bbox = unionBox(last.bbox, box);
+    } else {
+      words.push(item.str);
+      locations.push({ page, bbox: box });
+    }
+    previous = { left: x, right: x + width, y, size };
     if (item.hasEOL) flush();
   }
   flush();

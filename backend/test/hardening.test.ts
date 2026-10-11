@@ -10,7 +10,26 @@ import {
 import {
   extractClausesFromPlainText,
   locatedLinesFromOcrBlocks,
+  pageLines,
+  type PdfTextItem,
 } from "../src/modules/contracts/pdf-extraction.service.js";
+
+// Lays a right-to-left run out the way a per-glyph PDF does: one text item per character, advancing
+// leftwards, with a word space of `spaceWidth` points wherever the source text has a space.
+function perGlyphItems(text: string, rightEdge: number, y: number, glyphWidth = 6, spaceWidth = 3) {
+  const items: PdfTextItem[] = [];
+  let right = rightEdge;
+  for (const character of text) {
+    if (character === " ") {
+      right -= spaceWidth;
+      continue;
+    }
+    right -= glyphWidth;
+    items.push({ str: character, transform: [11, 0, 0, 11, right, y], width: glyphWidth, height: 11, hasEOL: false });
+  }
+  items[items.length - 1]!.hasEOL = true;
+  return items;
+}
 
 test("role-aware regex redaction removes direct identifiers before any provider call", async () => {
   const clauses = extractClausesFromPlainText([
@@ -73,4 +92,48 @@ test("the contract-level checklist reports covered, partial, and missing protect
   assert.equal(report.find((item) => item.protectionId === "RR-REC-EARLY-TERMINATION")?.status, "COVERED");
   assert.equal(report.find((item) => item.protectionId === "RR-REC-ENTRY-NOTICE")?.status, "PARTIAL");
   assert.equal(report.find((item) => item.protectionId === "RR-REC-WEAR-AND-TEAR")?.status, "MISSING");
+});
+
+test("per-glyph PDF items are joined into words by geometry, not by item boundaries", () => {
+  const lines = pageLines([
+    ...perGlyphItems("ערבות בנקאית בסך", 500, 700),
+    // A number laid out left to right, a word space to the left of the Hebrew run above.
+    { str: "30,000", transform: [11, 0, 0, 11, 370, 650], width: 33, height: 11, hasEOL: false },
+    ...perGlyphItems("ש״ח", 368, 650),
+  ], 3);
+  assert.deepEqual(lines.map((line) => line.text), ["ערבות בנקאית בסך", "30,000 ש״ח"]);
+  // One box per word, each the union of its glyphs, instead of one box per glyph.
+  assert.equal(lines[0]!.locations.length, 3);
+  assert.deepEqual(lines[0]!.locations[0], { page: 3, bbox: [470, 700, 30, 11] });
+});
+
+test("word-level PDF items keep their spacing and attach adjacent punctuation", () => {
+  const lines = pageLines([
+    { str: "ברחוב דיזנגוף", transform: [11, 0, 0, 11, 124, 582], width: 400, height: 11, hasEOL: false },
+    { str: "118", transform: [11, 0, 0, 11, 102.3, 582], width: 18.3, height: 11, hasEOL: false },
+    { str: ", דירה", transform: [11, 0, 0, 11, 74.6, 582], width: 27.9, height: 11, hasEOL: true },
+  ], 1);
+  assert.equal(lines[0]!.text, "ברחוב דיזנגוף 118, דירה");
+});
+
+test("numbered clauses keep the contract's own section number and short heading", () => {
+  const clauses = extractClausesFromPlainText([
+    "חוזה שכירות למגורים",
+    "4. תקופת השכירות",
+    "תקופת השכירות היא שנים עשר חודשים.",
+    "5. דמי השכירות החודשיים הם 6,000 ש״ח.",
+    "9.2 בטוחות נוספות",
+    "השוכר ימציא ערב.",
+  ].join("\n"));
+  assert.deepEqual(
+    clauses.map(({ id, sectionLabel, heading }) => ({ id, sectionLabel, heading })),
+    [
+      { id: "C001", sectionLabel: undefined, heading: undefined },
+      { id: "C002", sectionLabel: "4", heading: "תקופת השכירות" },
+      // A full sentence after the number is the clause itself, not a heading.
+      { id: "C003", sectionLabel: "5", heading: undefined },
+      { id: "C004", sectionLabel: "9.2", heading: "בטוחות נוספות" },
+    ],
+  );
+  assert.ok(!("heading" in clauses[2]!), "absent labels are omitted, not set to undefined");
 });

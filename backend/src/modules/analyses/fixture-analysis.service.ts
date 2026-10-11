@@ -27,14 +27,17 @@ type FixtureFile = {
 
 const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as FixtureFile;
 
+// Whitespace is ignored entirely: the capture predates the extractor joining per-glyph PDF items by
+// geometry, so the same document now extracts with different spacing ("ח ו ז ה" became "חוזה").
 function normalize(text: string) {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(/\s+/gu, "");
 }
 
 // One whole-document check, not a per-clause one: the fixture only replays its captured Claude
 // output when the uploaded PDF extracts to exactly the clauses it was captured from (same IDs, same
-// raw pre-redaction text, in order). This is deliberately stricter than matching by clause ID alone
-// - clause IDs are positional (e.g. "C012"), so a different contract could easily reuse one - and it
+// raw pre-redaction text apart from whitespace, in order). This is deliberately stricter than
+// matching by clause ID alone - clause IDs are positional (e.g. "C012"), so a different contract
+// could easily reuse one - and it
 // compares raw text rather than post-redaction text so the match doesn't depend on which PII_NER_MODE
 // happens to be configured. Anything that doesn't match falls back to the free deterministic
 // heuristic instead of serving another contract's canned answers.

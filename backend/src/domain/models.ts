@@ -38,6 +38,11 @@ export type ContractClause = {
   id: string;
   text: string;
   locations: ClauseLocation[];
+  // The contract's own numbering ("9", "9.2") and short heading ("בטוחות"), when the clause starts
+  // with a numbered heading. `id` stays positional; these exist so the tenant sees the contract's own
+  // labels and so a "see section 9" reference can be resolved to a clause.
+  sectionLabel?: string;
+  heading?: string;
 };
 
 export type ContractRecord = {
@@ -116,6 +121,9 @@ export type DeterministicCheck = {
 
 export type Finding = {
   clauseId: string;
+  // The clause's own numbering and heading (see ContractClause), copied for display.
+  sectionLabel?: string;
+  heading?: string;
   severity: Severity;
   category: FindingCategory;
   topic: FindingTopic;
@@ -151,7 +159,7 @@ export type Protection = {
 };
 
 export type AnalysisResult = {
-  schemaVersion: "1.1.0";
+  schemaVersion: "1.2.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";

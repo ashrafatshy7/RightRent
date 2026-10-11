@@ -45,7 +45,7 @@ import {
 // The schema/logic version behind AnalysisResult and Finding, folded into analysisInputHash below
 // so that a change here always produces a fresh analysis instead of returning a previously saved
 // record in the old shape (see findAnalysisByInput).
-const ANALYSIS_SCHEMA_VERSION = "1.1.0";
+const ANALYSIS_SCHEMA_VERSION = "1.2.0";
 
 type RetrievedReference = {
   id: string;
@@ -226,6 +226,8 @@ function toFinding(
   }
   return {
     clauseId: clause.id,
+    ...(clause.sectionLabel ? { sectionLabel: clause.sectionLabel } : {}),
+    ...(clause.heading ? { heading: clause.heading } : {}),
     severity: classifyClause(legalAssessment),
     category: categoryForAssessment(legalAssessment),
     topic: verdict.topic,

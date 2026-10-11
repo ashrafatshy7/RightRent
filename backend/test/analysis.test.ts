@@ -115,6 +115,9 @@ test("a quote is trusted only when it is genuinely part of the clause, otherwise
     resolveClauseQuote(clause, "ערבות בנקאית בסך 30,000 ש״ח"),
     "ערבות בנקאית בסך 30,000 ש״ח",
   );
+  // A quote spaced differently from the clause (per-glyph extraction, or a re-spaced model copy) is
+  // still recognized, and the tenant sees the clause's own spacing.
+  assert.equal(resolveClauseQuote(clause, "ע ר ב ו ת  בנקאית"), "ערבות בנקאית");
   // A candidate the model invented (not present in the clause) never reaches the tenant verbatim.
   const fallback = resolveClauseQuote(clause, "הדירה תימסר כשהיא מרוהטת במלואה");
   assert.equal(fallback, clause.text.trim());
