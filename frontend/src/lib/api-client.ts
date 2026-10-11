@@ -157,6 +157,14 @@ export const api = Object.freeze({
     token,
   ),
   markedPdfUrl: (analysisId: string) => `${API_BASE_URL}${API_PATHS.markedPdf(analysisId)}`,
+  // Fetched with the bearer token (never a token in the URL) and handed to pdf.js as bytes.
+  getContractFile: async (token: string, contractId: string) => {
+    const response = await fetch(`${API_BASE_URL}${API_PATHS.contractFile(contractId)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new ApiError(response.status, "CONTRACT_FILE_FAILED", "לא ניתן לטעון את החוזה המקורי.");
+    return response.arrayBuffer();
+  },
   getMarkedPdf: async (token: string, analysisId: string) => {
     const response = await fetch(`${API_BASE_URL}${API_PATHS.markedPdf(analysisId)}`, {
       headers: { authorization: `Bearer ${token}` },

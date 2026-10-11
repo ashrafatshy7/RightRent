@@ -207,6 +207,22 @@ test("POST /api/contracts/upload validates and extracts a PDF", async () => {
   contractId = body.contract.id;
 });
 
+test("the original contract PDF is served only to its owner", async () => {
+  assert.ok(contractId);
+  const owned = await fetch(`${baseUrl}/api/contracts/${contractId}/file`, authenticated());
+  assert.equal(owned.status, 200);
+  assert.equal(owned.headers.get("content-type"), "application/pdf");
+  assert.equal(owned.headers.get("cache-control"), "private, no-store");
+  const bytes = new Uint8Array(await owned.arrayBuffer());
+  assert.equal(new TextDecoder().decode(bytes.subarray(0, 5)), "%PDF-");
+
+  const foreign = await fetch(`${baseUrl}/api/contracts/${contractId}/file`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(foreign.status, 404);
+  assert.equal((await foreign.json()).error.code, "CONTRACT_NOT_FOUND");
+});
+
 test("contract upload rejects missing, mislabeled, and malformed files", async () => {
   const missing = await fetch(`${baseUrl}/api/contracts/upload`, authenticated({ method: "POST", body: new FormData() }));
   assert.equal(missing.status, 400);

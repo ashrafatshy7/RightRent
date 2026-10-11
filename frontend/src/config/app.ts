@@ -28,6 +28,7 @@ export const API_PATHS = Object.freeze({
   preferences: "/api/users/preferences",
   uploadContract: "/api/contracts/upload",
   analyzeContract: (contractId: string) => `/api/contracts/${contractId}/analyze`,
+  contractFile: (contractId: string) => `/api/contracts/${contractId}/file`,
   analysis: (analysisId: string) => `/api/analyses/${analysisId}`,
   markedPdf: (analysisId: string) => `/api/analyses/${analysisId}/marked-pdf`,
   history: "/api/history",

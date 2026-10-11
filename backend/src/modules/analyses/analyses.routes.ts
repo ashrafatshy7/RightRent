@@ -1,5 +1,4 @@
 import { Router } from "express";
-import path from "node:path";
 import { env } from "../../config/env.js";
 import { getStore } from "../../shared/data/store.js";
 import { HttpError } from "../../shared/http/http-error.js";
@@ -28,5 +27,5 @@ analysesRouter.get("/:id/marked-pdf", async (request, response) => {
   }
   response.type("application/pdf");
   response.setHeader("Content-Disposition", `inline; filename="rightrent-${analysis.analysisId}.pdf"`);
-  response.sendFile(path.join(env.markedPdfDirectory, analysis.markedPdf.storageKey));
+  response.sendFile(analysis.markedPdf.storageKey, { root: env.markedPdfDirectory });
 });
