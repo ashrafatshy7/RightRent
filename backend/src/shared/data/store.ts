@@ -5,11 +5,15 @@ import type {
   ContractRecord,
   LawEmbeddingRecord,
   LawSourceState,
+  LawSourceStatus,
   LawSyncRecord,
   NegotiationRecord,
   TenantPreferences,
   UserRecord,
 } from "../../domain/models.js";
+
+// A staged candidate can be approved whether or not an official change accounts for it.
+const APPROVABLE_LAW_STATUSES: LawSourceStatus[] = ["AWAITING_VERIFICATION", "WIKISOURCE_CHANGED"];
 
 export interface DataStore {
   close(): Promise<void>;
@@ -215,7 +219,7 @@ export class MemoryDataStore implements DataStore {
         && item.revisionId === revisionId
         && item.status === "CANDIDATE",
     );
-    if (state?.status !== "AWAITING_VERIFICATION"
+    if (!state || !APPROVABLE_LAW_STATUSES.includes(state.status)
       || state.candidateRevisionId !== revisionId
       || state.candidateContentHash !== contentHash
       || state.candidateSectionCount !== sectionCount
@@ -246,6 +250,7 @@ export class MemoryDataStore implements DataStore {
       candidateSectionCount: null,
       candidateSectionsHash: null,
       candidateSectionKeys: [],
+      candidateUnmatched: false,
       verifiedAt,
       verifiedBy,
       verificationReference,
@@ -527,7 +532,7 @@ class MongoDataStore implements DataStore {
             candidateContentHash: contentHash,
             candidateSectionCount: sectionCount,
             candidateSectionsHash: sectionsHash,
-            status: "AWAITING_VERIFICATION",
+            status: { $in: APPROVABLE_LAW_STATUSES },
           },
           { session },
         );
@@ -562,6 +567,7 @@ class MongoDataStore implements DataStore {
           candidateSectionCount: null,
           candidateSectionsHash: null,
           candidateSectionKeys: [],
+          candidateUnmatched: false,
           verifiedAt: new Date().toISOString(),
           verifiedBy,
           verificationReference,

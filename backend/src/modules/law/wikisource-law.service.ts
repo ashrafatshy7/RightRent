@@ -125,6 +125,43 @@ function removeDeeperContentSiblings($: CheerioAPI, $owner: Cheerio<AnyNode>, ow
   }
 }
 
+// An amendment rewrites part of a paragraph, so the version it replaces keeps most of its
+// wording at the start and the end. Unrelated neighbouring paragraphs share almost none.
+function sharesWording(previous: string, amended: string) {
+  const limit = Math.min(previous.length, amended.length);
+  let prefix = 0;
+  while (prefix < limit && previous[prefix] === amended[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < limit - prefix && previous.at(-1 - suffix) === amended.at(-1 - suffix)) suffix += 1;
+  return (prefix + suffix) * 2 >= limit;
+}
+
+// Wikisource states a deferred amendment of an unnumbered paragraph as a second paragraph of the
+// same level that opens with "(החל מיום …):". Once that date has passed, the earlier paragraph
+// (with any sub-paragraphs between the two) is the superseded version and must not stay in the text.
+function removeSupersededVersion(
+  $: CheerioAPI,
+  $owner: Cheerio<AnyNode>,
+  ownerLevel: number,
+  amendedText: string,
+) {
+  const between: AnyNode[] = [];
+  for (const sibling of $owner.prevAll().toArray()) {
+    const $sibling = $(sibling);
+    const [kind, level] = classify($sibling);
+    if ((kind === "number" || kind === "content") && level !== null && level > ownerLevel) {
+      between.push(sibling);
+      continue;
+    }
+    if (kind === "content" && level === ownerLevel
+      && sharesWording(cleanText($, sibling, false), amendedText)) {
+      $sibling.remove();
+      $(between).remove();
+    }
+    return;
+  }
+}
+
 function filterByEffectiveDate($: CheerioAPI, asOf: string) {
   for (const note of $("span.law-note").toArray()) {
     const $note = $(note);
@@ -146,6 +183,10 @@ function filterByEffectiveDate($: CheerioAPI, asOf: string) {
     }
 
     if (markerOnly) {
+      const ownerText = kind === "content" ? cleanText($, $owner[0]!, false) : "";
+      if (level !== null && ownerText.startsWith(noteText)) {
+        removeSupersededVersion($, $owner, level, normalizeText(ownerText.slice(noteText.length)));
+      }
       $note.remove();
       continue;
     }

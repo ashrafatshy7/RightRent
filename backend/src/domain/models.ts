@@ -279,6 +279,9 @@ export type LawSourceState = {
   candidateSectionCount: number | null;
   candidateSectionsHash: string | null;
   candidateSectionKeys: string[];
+  // The candidate changes the approved text with neither a new Knesset publication nor an
+  // approved deferred amendment entering into force to account for it.
+  candidateUnmatched: boolean;
   checkedAt: string;
   verifiedAt: string | null;
   verifiedBy: string | null;

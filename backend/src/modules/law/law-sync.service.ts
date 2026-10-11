@@ -96,6 +96,7 @@ function observedState(
     candidateSectionCount: candidate ? wiki.chunks.length : null,
     candidateSectionsHash: candidate ? wiki.sectionsHash : null,
     candidateSectionKeys: candidate ? wiki.sectionKeys : [],
+    candidateUnmatched: false,
     checkedAt,
     verifiedAt: previous?.verifiedAt ?? null,
     verifiedBy: previous?.verifiedBy ?? null,
@@ -149,6 +150,7 @@ function failedState(
     candidateSectionCount: null,
     candidateSectionsHash: null,
     candidateSectionKeys: [],
+    candidateUnmatched: false,
     checkedAt,
     verifiedAt: null,
     verifiedBy: null,
@@ -224,8 +226,10 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
       && previous.candidateRevisionId === wiki.revisionId
       && previous.candidateContentHash === wiki.contentHash;
     if (candidateAlreadyStaged) {
+      const candidateUnmatched = previous.candidateUnmatched === true;
+      const status = candidateUnmatched ? "WIKISOURCE_CHANGED" : "AWAITING_VERIFICATION";
       const state: LawSourceState = {
-        ...observedState(source, previous, official, wiki, "AWAITING_VERIFICATION", checkedAt, false),
+        ...observedState(source, previous, official, wiki, status, checkedAt, false),
         candidateOfficialFingerprint: previous.candidateOfficialFingerprint,
         candidateRevisionId: previous.candidateRevisionId,
         candidateSourceAsOf: previous.candidateSourceAsOf,
@@ -235,21 +239,25 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
         candidateSectionKeys: previous.candidateSectionKeys?.length
           ? previous.candidateSectionKeys
           : wiki.sectionKeys,
+        candidateUnmatched,
       };
       const sync = syncRecord(source, "UNCHANGED", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
       return sync;
     }
 
+    let candidateUnmatched = false;
     if (previous?.activeOfficialFingerprint === official.fingerprint
+      && previous.activeRevisionId !== null
       && previous.activeRevisionId !== wiki.revisionId) {
-      const state = observedState(source, previous, official, wiki, "WIKISOURCE_CHANGED", checkedAt, false);
-      const sync = syncRecord(source, "WIKISOURCE_CHANGED", checkedAt, official, wiki);
-      await store.recordLawCheck(state, sync);
-      return sync;
-    }
-
-    if (previous?.activeContentHash === wiki.contentHash) {
+      // Wikisource changed the text without a new Knesset publication. That is expected when a
+      // deferred amendment in the approved revision enters into force: the bot then merges it,
+      // and the approved revision read as of today already yields the same text. Any other
+      // change is still staged, so it never blocks the law, but is flagged for closer review.
+      const approved = await fetchWikisourceLawVersion(source, wiki.sourceAsOf, previous.activeRevisionId);
+      candidateUnmatched = approved.contentHash !== wiki.contentHash
+        || approved.sectionsHash !== wiki.sectionsHash;
+    } else if (previous?.activeContentHash === wiki.contentHash) {
       const state = observedState(source, previous, official, wiki, "OFFICIAL_UPDATE_PENDING", checkedAt, false);
       const sync = syncRecord(source, "OFFICIAL_UPDATE_PENDING", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
@@ -257,8 +265,25 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
     }
 
     const embeddings = await createEmbeddingRecords(official, wiki);
-    const state = observedState(source, previous, official, wiki, "AWAITING_VERIFICATION", checkedAt, true);
-    const sync = syncRecord(source, "CANDIDATE_STAGED", checkedAt, official, wiki);
+    const state: LawSourceState = {
+      ...observedState(
+        source,
+        previous,
+        official,
+        wiki,
+        candidateUnmatched ? "WIKISOURCE_CHANGED" : "AWAITING_VERIFICATION",
+        checkedAt,
+        true,
+      ),
+      candidateUnmatched,
+    };
+    const sync = syncRecord(
+      source,
+      candidateUnmatched ? "WIKISOURCE_CHANGED" : "CANDIDATE_STAGED",
+      checkedAt,
+      official,
+      wiki,
+    );
     await store.stageLawVersion(embeddings, state, sync);
     return sync;
   } catch (error) {
