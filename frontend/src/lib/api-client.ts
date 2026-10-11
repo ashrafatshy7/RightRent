@@ -2,6 +2,11 @@ import { API_BASE_URL, API_PATHS } from "../config/app";
 import type {
   Analysis,
   AuthResponse,
+  CostInputs,
+  CostScenario,
+  CostSimulation,
+  CpiSnapshot,
+  FinancialOverrides,
   LawApproval,
   LawSourceState,
   PublicUser,
@@ -143,6 +148,16 @@ export const api = Object.freeze({
   analyzeContract: analyzeWithConsoleProgress,
   getAnalysis: (token: string, analysisId: string) => request<{ analysis: Analysis }>(API_PATHS.analysis(analysisId), {}, token),
   getHistory: (token: string) => request<{ analyses: Analysis[] }>(API_PATHS.history, {}, token),
+  simulateCost: (token: string, analysisId: string, scenario?: Partial<CostScenario>) => request<{ simulation: CostSimulation; inputs: CostInputs; cpi: CpiSnapshot }>(
+    API_PATHS.costSimulation(analysisId),
+    { method: "POST", body: JSON.stringify(scenario ? { scenario } : {}) },
+    token,
+  ),
+  saveFinancialOverrides: (token: string, analysisId: string, overrides: FinancialOverrides) => request<{ financialOverrides: FinancialOverrides }>(
+    API_PATHS.financialOverrides(analysisId),
+    { method: "PUT", body: JSON.stringify(overrides) },
+    token,
+  ),
   deleteHistory: (token: string, analysisId: string) => request<void>(API_PATHS.historyItem(analysisId), { method: "DELETE" }, token),
   getReadiness: () => request<Readiness>(API_PATHS.readiness, {}, undefined, [503]),
   getLawStatus: (token: string) => request<{ laws: LawSourceState[] }>(API_PATHS.adminLawStatus, {}, token),

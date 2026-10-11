@@ -6,6 +6,7 @@ import type {
   AnalysisRecord,
   AnalysisResult,
   ConfidenceLevel,
+  FinancialTerms,
   ContractClause,
   ContractRecord,
   DeterministicCheck,
@@ -23,6 +24,8 @@ import {
   analyzeWithClaude,
   embedText,
   embedTexts,
+  extractFinancialTermsWithClaude,
+  FINANCIAL_REQUEST_FINGERPRINT,
   PROTECTION_REQUEST_FINGERPRINT,
   VERDICT_REQUEST_FINGERPRINT,
   type ProviderVerdict,
@@ -32,6 +35,11 @@ import { traceAnalysis, traceAnalysisFailure } from "./analysis-logger.js";
 import { redactClauses } from "./anonymization.service.js";
 import { categoryForAssessment, classifyClause, isSubstantiveClause, resolveClauseQuote } from "./classification.js";
 import { linkClauses, type ClauseGraph, type ClauseLink } from "./clause-linking.service.js";
+import {
+  extractFinancialTermsDeterministically,
+  fromModelTerms,
+  mergeFinancialTerms,
+} from "./financial-terms.service.js";
 import {
   computeDeterministicChecks,
   DETERMINISTIC_RULE_LAW_INFO,
@@ -49,7 +57,7 @@ import {
 // The schema/logic version behind AnalysisResult and Finding, folded into analysisInputHash below
 // so that a change here always produces a fresh analysis instead of returning a previously saved
 // record in the old shape (see findAnalysisByInput).
-const ANALYSIS_SCHEMA_VERSION = "1.3.0";
+const ANALYSIS_SCHEMA_VERSION = "1.4.0";
 
 type RetrievedReference = {
   id: string;
@@ -386,6 +394,38 @@ async function protectionReport(
   return { protections: value, reused };
 }
 
+// The money terms for the cost simulator: the local rules always, and with the Anthropic provider a
+// Claude reading merged in after every value is checked against its clause. A failed model reading
+// does not fail the analysis - the rules' reading is used and the trace says so.
+async function financialTerms(
+  redactedClauses: ContractClause[],
+  graph: ClauseGraph,
+  store: DataStore,
+  scope: AiResultScope,
+): Promise<FinancialTerms> {
+  const rule = extractFinancialTermsDeterministically(
+    redactedClauses.filter((clause) => graph.profiles.has(clause.id)),
+    graph.profiles,
+    graph.contractFacts,
+  );
+  if (env.analysisProvider !== "anthropic") return rule;
+  const key = sha256({
+    kind: "financial-terms",
+    request: FINANCIAL_REQUEST_FINGERPRINT,
+    userId: scope.userId,
+    clauses: redactedClauses.map(({ id, text }) => ({ id, text })),
+  });
+  try {
+    const { value, reused } = await reuseOrCompute(store, key, () => extractFinancialTermsWithClaude(redactedClauses));
+    const merged = mergeFinancialTerms(rule, fromModelTerms(value, redactedClauses));
+    traceAnalysis(`Financial terms read${reused ? " (reused from an earlier attempt)" : ""}: rent ${merged.monthlyRent?.value ?? "?"}, term ${merged.leaseTermMonths?.value ?? "?"} months, ${merged.charges.length} charges.`);
+    return merged;
+  } catch (error) {
+    traceAnalysis(`Claude could not read the financial terms (${error instanceof Error ? error.message : "unknown error"}); using the local rules only.`, "warn");
+    return rule;
+  }
+}
+
 async function lawCorpusFingerprint(store: DataStore): Promise<LawCorpusFingerprint> {
   if (env.analysisProvider !== "anthropic") return "deterministic-fixture-v1";
   return (await store.listLawSourceStates())
@@ -540,7 +580,8 @@ export async function analyzeContract(
       );
       return protections;
     })();
-    const [verdicts, protections] = await Promise.all([verdictsPromise, protectionsPromise]);
+    const financialPromise = financialTerms(redaction.clauses, graph, store, scope);
+    const [verdicts, protections, financial] = await Promise.all([verdictsPromise, protectionsPromise, financialPromise]);
     const findings = withRelatedFindingIds(
       analyzableClauses
         .map((clause, index) =>
@@ -583,6 +624,7 @@ export async function analyzeContract(
       crossClauseIssues: mergeCrossClauseIssues(findings, analyzableClauses.map((clause) => clause.id)),
       clauseLinking: env.clauseLinking,
       protectionReport: protections,
+      financialTerms: financial,
       missingProtections: incompleteProtections,
       suggestedAdditions: incompleteProtections,
       preferencesSnapshot: structuredClone(preferences),

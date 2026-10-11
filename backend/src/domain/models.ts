@@ -197,8 +197,85 @@ export type Protection = {
   suggestedText?: string;
 };
 
+// Where a financial term was read from. A value is "verified" when its quote is verbatim contract
+// text and contains the number itself; unverified values are shown for confirmation and are not
+// counted until the tenant confirms them. `conflict` marks a value the model and the local rules
+// read differently.
+export type TermSource = {
+  clauseId: string;
+  quote: string;
+  verified: boolean;
+  origin: "RULE" | "MODEL";
+  conflict?: boolean;
+};
+
+export type SourcedNumber = TermSource & { value: number };
+
+export type IndexationFrequency = "MONTHLY" | "ANNUAL" | "AT_RENEWAL" | "UNKNOWN";
+export type ChargeKind =
+  | "ARNONA"
+  | "WATER"
+  | "ELECTRICITY"
+  | "GAS"
+  | "VAAD_BAYIT"
+  | "BUILDING_INSURANCE"
+  | "SPECIAL_BUILDING_EXPENSES"
+  | "CONTENTS_INSURANCE"
+  | "OTHER";
+export type OneTimeCostKind = "BROKER_FEE" | "LEGAL_FEE" | "CLEANING" | "OTHER";
+export type SecurityKind = "BANK_GUARANTEE" | "CASH_DEPOSIT" | "PROMISSORY_NOTE" | "GUARANTOR" | "OTHER";
+export type EarlyExitKind =
+  | "UNTIL_REPLACEMENT"
+  | "UNTIL_END"
+  | "FIXED_MONTHS"
+  | "FIXED_AMOUNT"
+  | "ALLOWED_WITH_NOTICE"
+  | "NOT_ALLOWED";
+
+// The money terms of a contract, read so the cost simulator can turn them into shekels. Values come
+// from local rules and, with the Anthropic provider, from Claude; either way every number is checked
+// against the clause it cites before it is trusted (see financial-terms.service.ts).
+export type FinancialTerms = {
+  monthlyRent: SourcedNumber | null;
+  leaseTermMonths: SourcedNumber | null;
+  leaseStart: (TermSource & { value: string }) | null;
+  indexation: (TermSource & { index: "CPI" | "USD" | "OTHER"; frequency: IndexationFrequency; floorAtBase: boolean }) | null;
+  annualIncreasePercent: SourcedNumber | null;
+  option: { months: SourcedNumber | null; rent: SourcedNumber | null; increasePercent: SourcedNumber | null };
+  charges: Array<TermSource & { kind: ChargeKind; payer: "TENANT" | "LANDLORD"; monthlyAmount: number | null }>;
+  oneTimeCosts: Array<TermSource & { kind: OneTimeCostKind; amount: number | null; timing: "START" | "END" }>;
+  securities: Array<TermSource & { kind: SecurityKind; amount: number | null; returnDays: number | null }>;
+  lateVacating: (TermSource & { perDay: number | null; dailyRentMultiple: number | null }) | null;
+  latePayment: (TermSource & { perDay: number | null; monthlyInterestPercent: number | null }) | null;
+  earlyExit: (TermSource & { kind: EarlyExitKind; months: number | null; amount: number | null; noticeDays: number | null }) | null;
+  // Plain Hebrew notes on what the contract leaves unstated ("לא צוין סכום הארנונה").
+  unknowns: string[];
+};
+
+// The tenant's corrections and confirmations of financial terms, kept on the analysis. Setting a
+// value confirms it; amounts the contract leaves out (arnona, vaad bayit) can be estimated here.
+export type FinancialOverrides = {
+  monthlyRent?: number;
+  leaseTermMonths?: number;
+  leaseStart?: string;
+  indexationLinked?: boolean;
+  indexationFrequency?: Exclude<IndexationFrequency, "UNKNOWN">;
+  annualIncreasePercent?: number;
+  optionMonths?: number;
+  optionRent?: number;
+  optionIncreasePercent?: number;
+  securityAmount?: number;
+  lateVacatingPerDay?: number;
+  latePaymentPerDay?: number;
+  earlyExitKind?: EarlyExitKind;
+  earlyExitMonths?: number;
+  earlyExitNoticeDays?: number;
+  chargeAmounts?: Partial<Record<ChargeKind, number>>;
+  oneTimeAmounts?: Partial<Record<OneTimeCostKind, number>>;
+};
+
 export type AnalysisResult = {
-  schemaVersion: "1.3.0";
+  schemaVersion: "1.4.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";
@@ -214,6 +291,7 @@ export type AnalysisResult = {
   // Whether related clauses were supplied as context (CLAUSE_LINKING), recorded for evaluation runs.
   clauseLinking: boolean;
   protectionReport: Protection[];
+  financialTerms: FinancialTerms;
   missingProtections: Protection[];
   suggestedAdditions: Protection[];
   preferencesSnapshot: TenantPreferences;
@@ -240,6 +318,7 @@ export type AnalysisResult = {
 export type AnalysisRecord = AnalysisResult & {
   userId: string;
   createdAt: string;
+  financialOverrides?: FinancialOverrides;
 };
 
 export type NegotiationState = "PRIORITIZE" | "STRATEGY" | "DRAFT" | "COUNTER" | "DONE";

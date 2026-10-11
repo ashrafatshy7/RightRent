@@ -31,6 +31,8 @@ export const API_PATHS = Object.freeze({
   contractFile: (contractId: string) => `/api/contracts/${contractId}/file`,
   analysis: (analysisId: string) => `/api/analyses/${analysisId}`,
   markedPdf: (analysisId: string) => `/api/analyses/${analysisId}/marked-pdf`,
+  costSimulation: (analysisId: string) => `/api/analyses/${analysisId}/cost-simulation`,
+  financialOverrides: (analysisId: string) => `/api/analyses/${analysisId}/financial-overrides`,
   history: "/api/history",
   historyItem: (analysisId: string) => `/api/history/${analysisId}`,
   readiness: "/api/health/ready",

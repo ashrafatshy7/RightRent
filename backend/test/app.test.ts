@@ -269,6 +269,50 @@ test("analysis returns deterministic legal findings and a marked PDF", async () 
   assert.ok((await marked.arrayBuffer()).byteLength > 100);
 });
 
+test("the cost simulator runs on the analysis's terms and the tenant's saved corrections", async () => {
+  assert.ok(analysisId);
+  const json = { "content-type": "application/json" };
+  const simulate = (scenario: object) => fetch(`${baseUrl}/api/analyses/${analysisId}/cost-simulation`, authenticated({
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ scenario }),
+  }));
+
+  let response = await simulate({ annualInflationPercent: 0 });
+  assert.equal(response.status, 200);
+  let body = await response.json();
+  assert.equal(body.simulation.ready, true);
+  assert.equal(body.simulation.totals.total, 72_000);
+  assert.equal(body.cpi.source, "ASSUMPTION");
+
+  response = await fetch(`${baseUrl}/api/analyses/${analysisId}/financial-overrides`, authenticated({
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ monthlyRent: 5_000 }),
+  }));
+  assert.equal(response.status, 200);
+  // The contract says nothing about leaving early, so leaving after six months is priced at the
+  // worst case: rent until the end of the term.
+  body = await (await simulate({ annualInflationPercent: 0, exitAfterMonth: 6 })).json();
+  assert.equal(body.simulation.totals.total, 60_000);
+  assert.equal(body.simulation.lines.find((line: { id: string }) => line.id === "early-exit").amount, 30_000);
+  const saved = await (await fetch(`${baseUrl}/api/analyses/${analysisId}`, authenticated())).json();
+  assert.deepEqual(saved.analysis.financialOverrides, { monthlyRent: 5_000 });
+
+  const invalid = await fetch(`${baseUrl}/api/analyses/${analysisId}/financial-overrides`, authenticated({
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ monthlyRent: -1 }),
+  }));
+  assert.equal(invalid.status, 400);
+  const foreign = await fetch(`${baseUrl}/api/analyses/${analysisId}/cost-simulation`, {
+    method: "POST",
+    headers: { ...json, authorization: `Bearer ${adminToken}` },
+    body: "{}",
+  });
+  assert.equal(foreign.status, 404);
+});
+
 test("analysis cache includes the confirmed preference snapshot", async () => {
   assert.ok(contractId);
   assert.ok(analysisId);

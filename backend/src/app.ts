@@ -7,6 +7,7 @@ import { contractsRouter } from "./modules/contracts/contracts.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { historyRouter } from "./modules/history/history.routes.js";
 import { lawRouter } from "./modules/law/law.routes.js";
+import { marketRouter } from "./modules/market/market.routes.js";
 import { negotiationsRouter } from "./modules/negotiations/negotiations.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
 import { errorHandler } from "./shared/http/error-handler.js";
@@ -31,6 +32,7 @@ app.use("/api/contracts", contractsRouter);
 app.use("/api/analyses", analysesRouter);
 app.use("/api/negotiation", negotiationsRouter);
 app.use("/api/history", historyRouter);
+app.use("/api/market", marketRouter);
 app.use("/internal/law", lawRouter);
 
 app.use(notFoundHandler);

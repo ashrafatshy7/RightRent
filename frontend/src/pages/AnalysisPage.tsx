@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  Calculator,
   Download,
   ExternalLink,
   GitMerge,
@@ -17,6 +18,7 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { CostSimulator } from "../components/CostSimulator";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/PageHeader";
@@ -80,6 +82,7 @@ export function AnalysisPage() {
   const [sideTab, setSideTab] = useState<"contract" | "protections">("contract");
   const [showCompliant, setShowCompliant] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [mainTab, setMainTab] = useState<"findings" | "cost">("findings");
   const isNarrow = useMediaQuery(NARROW_LAYOUT_QUERY);
   const query = useQuery({ queryKey: ["analysis", analysisId], queryFn: () => api.getAnalysis(token!, analysisId), enabled: Boolean(analysisId) });
   const analysis = query.data?.analysis;
@@ -188,6 +191,10 @@ export function AnalysisPage() {
   }
 
   const incompleteProtections = analysis.protectionReport.filter((protection) => protection.status !== "COVERED").length;
+  const labelFor = (clauseId: string) => {
+    const finding = findingsByClauseId.get(clauseId);
+    return finding ? clauseLabel(finding) : clauseId;
+  };
   const protectionPanel = <ProtectionPanel analysis={analysis} findingsByClauseId={findingsByClauseId} onShowClause={showInContract} />;
 
   return (
@@ -244,6 +251,11 @@ export function AnalysisPage() {
 
       <div className="analysis-workspace">
         <section className="findings-section">
+          <div className="main-tabs" role="tablist" aria-label="תצוגת הניתוח">
+            <button type="button" role="tab" aria-selected={mainTab === "findings"} className={mainTab === "findings" ? "active" : ""} onClick={() => setMainTab("findings")}><FileText size={16} /> הממצאים</button>
+            <button type="button" role="tab" aria-selected={mainTab === "cost"} className={mainTab === "cost" ? "active" : ""} onClick={() => setMainTab("cost")}><Calculator size={16} /> עלות החוזה</button>
+          </div>
+          {mainTab === "cost" ? <CostSimulator analysis={analysis} token={token!} labelFor={labelFor} onShowClause={showInContract} /> : (<>
           <div className="section-heading">
             <div><span className="eyebrow">סעיף אחר סעיף</span><h2>הממצאים</h2></div>
             <div className="findings-tools">
@@ -262,6 +274,7 @@ export function AnalysisPage() {
             />
           ))}</div>
           {isNarrow ? <div className="protection-panel inline-protections">{protectionPanel}</div> : null}
+          </>)}
         </section>
 
         <aside className={`analysis-side ${sheetOpen ? "sheet-open" : ""}`} aria-label="החוזה וההגנות">

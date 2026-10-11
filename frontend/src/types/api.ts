@@ -131,6 +131,104 @@ export type Protection = {
   suggestedText?: string;
 };
 
+export type TermSource = { clauseId: string; quote: string; verified: boolean; origin: "RULE" | "MODEL"; conflict?: boolean };
+export type SourcedNumber = TermSource & { value: number };
+export type IndexationFrequency = "MONTHLY" | "ANNUAL" | "AT_RENEWAL" | "UNKNOWN";
+export type ChargeKind = "ARNONA" | "WATER" | "ELECTRICITY" | "GAS" | "VAAD_BAYIT" | "BUILDING_INSURANCE" | "SPECIAL_BUILDING_EXPENSES" | "CONTENTS_INSURANCE" | "OTHER";
+export type OneTimeCostKind = "BROKER_FEE" | "LEGAL_FEE" | "CLEANING" | "OTHER";
+export type SecurityKind = "BANK_GUARANTEE" | "CASH_DEPOSIT" | "PROMISSORY_NOTE" | "GUARANTOR" | "OTHER";
+export type EarlyExitKind = "UNTIL_REPLACEMENT" | "UNTIL_END" | "FIXED_MONTHS" | "FIXED_AMOUNT" | "ALLOWED_WITH_NOTICE" | "NOT_ALLOWED";
+
+export type FinancialTerms = {
+  monthlyRent: SourcedNumber | null;
+  leaseTermMonths: SourcedNumber | null;
+  leaseStart: (TermSource & { value: string }) | null;
+  indexation: (TermSource & { index: "CPI" | "USD" | "OTHER"; frequency: IndexationFrequency; floorAtBase: boolean }) | null;
+  annualIncreasePercent: SourcedNumber | null;
+  option: { months: SourcedNumber | null; rent: SourcedNumber | null; increasePercent: SourcedNumber | null };
+  charges: Array<TermSource & { kind: ChargeKind; payer: "TENANT" | "LANDLORD"; monthlyAmount: number | null }>;
+  oneTimeCosts: Array<TermSource & { kind: OneTimeCostKind; amount: number | null; timing: "START" | "END" }>;
+  securities: Array<TermSource & { kind: SecurityKind; amount: number | null; returnDays: number | null }>;
+  lateVacating: (TermSource & { perDay: number | null; dailyRentMultiple: number | null }) | null;
+  latePayment: (TermSource & { perDay: number | null; monthlyInterestPercent: number | null }) | null;
+  earlyExit: (TermSource & { kind: EarlyExitKind; months: number | null; amount: number | null; noticeDays: number | null }) | null;
+  unknowns: string[];
+};
+
+export type FinancialOverrides = {
+  monthlyRent?: number;
+  leaseTermMonths?: number;
+  leaseStart?: string;
+  indexationLinked?: boolean;
+  indexationFrequency?: Exclude<IndexationFrequency, "UNKNOWN">;
+  annualIncreasePercent?: number;
+  optionMonths?: number;
+  optionRent?: number;
+  optionIncreasePercent?: number;
+  securityAmount?: number;
+  lateVacatingPerDay?: number;
+  latePaymentPerDay?: number;
+  earlyExitKind?: EarlyExitKind;
+  earlyExitMonths?: number;
+  earlyExitNoticeDays?: number;
+  chargeAmounts?: Partial<Record<ChargeKind, number>>;
+  oneTimeAmounts?: Partial<Record<OneTimeCostKind, number>>;
+};
+
+export type CostScenario = {
+  annualInflationPercent: number;
+  includeOption: boolean;
+  exitAfterMonth: number | null;
+  replacementAfterMonths: number;
+  lateVacatingDays: number;
+  latePaymentDays: number;
+};
+
+export type CostLine = { id: string; label: string; amount: number; formula: string; sourceClauseIds: string[] };
+export type CostMonth = {
+  month: number;
+  period: string | null;
+  phase: "TERM" | "OPTION" | "EXIT" | "LATE";
+  baseRent: number;
+  increase: number;
+  indexation: number;
+  charges: number;
+  oneTime: number;
+  penalties: number;
+  total: number;
+  cumulative: number;
+};
+
+export type CostSimulation = {
+  ready: boolean;
+  missing: Array<"monthlyRent" | "leaseTermMonths">;
+  months: CostMonth[];
+  totals: { rent: number; increases: number; indexation: number; charges: number; oneTime: number; penalties: number; total: number; averageMonthly: number };
+  baselineTotal: number;
+  security: { total: number; cashLocked: number; returnDays: number | null };
+  budget: { maxMonthlyRentIls: number; peakMonthlyRent: number; firstMonthOverBudget: number | null };
+  increase: { effectiveAnnualPercent: number; preferenceMax: number; exceedsPreference: boolean };
+  lines: CostLine[];
+  notes: string[];
+  scenario: CostScenario;
+};
+
+export type CpiSnapshot = {
+  source: "CBS" | "ASSUMPTION";
+  latestPeriod: string | null;
+  last12MonthsPercent: number;
+  monthly: Array<{ period: string; percent: number }>;
+  fetchedAt: string;
+};
+
+export type CostInputs = {
+  monthlyRent: number | null;
+  leaseTermMonths: number | null;
+  indexation: { linked: boolean; frequency: "MONTHLY" | "ANNUAL" | "AT_RENEWAL"; floorAtBase: boolean; assumedFrequency: boolean };
+  option: { months: number | null; rent: number | null; increasePercent: number | null };
+  earlyExit: { kind: EarlyExitKind | null; months: number | null; amount: number | null; noticeDays: number | null; clauseId: string | null };
+};
+
 export type Analysis = {
   schemaVersion: string;
   analysisId: string;
@@ -145,6 +243,9 @@ export type Analysis = {
   crossClauseIssues?: Array<CrossClauseIssue & { severity: Severity }>;
   clauseLinking?: boolean;
   protectionReport: Protection[];
+  // Absent on analyses saved before the cost simulator.
+  financialTerms?: FinancialTerms;
+  financialOverrides?: FinancialOverrides;
   missingProtections: Protection[];
   suggestedAdditions: Protection[];
   preferencesSnapshot: TenantPreferences;

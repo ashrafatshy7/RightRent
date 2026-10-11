@@ -109,7 +109,7 @@ export const FACT_NAMES: Record<FactKind, string> = {
 
 // Hebrew attaches up to a few one-letter prefixes (ו, ה, ב, ל, מ, ש, כ) to the next word, so every
 // term may be preceded by them; the lookbehind keeps a term from matching inside another word.
-function term(alternatives: string) {
+export function term(alternatives: string) {
   return new RegExp(`(?<![\\p{L}])(?:[והבלמשכ]{1,3})?(?:${alternatives})`, "giu");
 }
 
@@ -120,13 +120,13 @@ const CONCEPT_PATTERNS: Record<ConceptId, RegExp> = {
   GUARANTOR: term("ערב(?:ים)?\\s+(?:אישי|אישיים|לחוזה|להבטחת|מטעם)|ערבים"),
   INDEXATION: term("צמוד(?:ים|ה|ות)?\\s+ל(?:מדד|דולר)|הצמדה|מדד\\s+(?:המחירים|הבסיס|הידוע)"),
   RENT_INCREASE: term("(?:העלאת|עליית|הגדלת|עדכון)\\s+(?:ה)?(?:דמי|שכר)|יעלו\\s+ב|יוגדלו\\s+ב"),
-  OPTION: term("אופציה|האופציה|הארכת\\s+(?:ה)?(?:שכירות|חוזה|הסכם)|תקופה\\s+נוספת|תקופת\\s+ההארכה|התקופה\\s+הנוספת"),
+  OPTION: term("אופציה|האופציה|הארכת\\s+(?:ה)?(?:שכירות|חוזה|הסכם)|הארכה|תקופה\\s+(?:ה)?נוספת|תקופת\\s+ההארכה|התקופה\\s+הנוספת"),
   URGENT_REPAIR: term("ליקוי\\s+דחוף|ליקויים\\s+דחופים|תיקון\\s+דחוף|תקלה\\s+דחופה|ליקוי\\s+המונע\\s+מגורים"),
   // "תיקון" is also an amendment ("תיקון להסכם") or a cure ("תיקון ההפרה"), which are not repairs.
   REPAIRS: term("תיקון(?!\\s+(?:ל|ב)?(?:ה)?(?:חוזה|הסכם|הפרה))|תיקונים(?!\\s+(?:ל|ב)?(?:ה)?(?:חוזה|הסכם))|ליקוי|ליקויים|תקלה|תקלות|תחזוקה|אחזקה|יתקן|תתקן|יתוקן"),
   SELF_REPAIR: term("(?:תיקון|תיקונים|יתקן|תתקן)\\s+(?:עצמאי|בעצמו|בעצמה)|באופן\\s+עצמאי|בעל\\s+מקצוע|החזר\\s+(?:כספי|הוצאה|הוצאות)"),
   ENTRY: term("להיכנס\\s+לדירה|כניסת\\s+המשכיר|ייכנס\\s+לדירה|ביקור\\s+בדירה|ביקורת\\s+בדירה|להציג(?:ה)?\\s+(?:את\\s+הדירה\\s+)?ל"),
-  EARLY_TERMINATION: term("(?:סיום|ביטול)\\s+מוקדם|(?:לבטל|יבטל)\\s+את\\s+(?:ה)?(?:חוזה|הסכם)|להביא\\s+את\\s+(?:ה)?(?:חוזה|הסכם)\\s+לסיום|יציאה\\s+מוקדמת"),
+  EARLY_TERMINATION: term("(?:סיום|ביטול)\\s+מוקדם|(?:לבטל|יבטל|לסיים|יסיים|תסיים)\\s+את\\s+(?:ה)?(?:חוזה|הסכם|שכירות)|להביא\\s+את\\s+(?:ה)?(?:חוזה|הסכם|שכירות)\\s+לסיום|יציאה\\s+מוקדמת"),
   REPLACEMENT_TENANT: term("שוכר\\s+(?:חלופי|מחליף|אחר\\s+במקומו)|העברת\\s+(?:ה)?שכירות"),
   BREACH: term("הפרה\\s+יסודית|הפרות\\s+יסודיות|הפרה|הפרת|יפר|תפר"),
   VACATING: term("פינוי|יפנה|תפנה|לפנות|תום\\s+(?:תקופת\\s+)?(?:ה)?שכירות|השבת\\s+החזקה|החזרת\\s+הדירה"),
@@ -228,12 +228,35 @@ function countMatches(pattern: RegExp, text: string) {
   return [...text.matchAll(pattern)].length;
 }
 
+export type NumberMention = { value: number; index: number; text: string };
+
+// Every money amount in a sentence ("6,000 ש״ח", "₪ 250", "ILS 6000"), with where it appears.
+export function amountsIn(sentence: string): NumberMention[] {
+  return [...sentence.matchAll(MONEY)].map((match) =>
+    ({ value: numeric(match[1] ?? match[2] ?? ""), index: match.index, text: match[0] }));
+}
+
+// Every duration, in days or months ("שבעה ימים", "24 חודשים", "שנה אחת", "48 שעות").
+export function durationsIn(sentence: string): Array<NumberMention & { unit: "days" | "months" }> {
+  const explicit = [...sentence.matchAll(DURATION)].flatMap((match) => {
+    const duration = durationValue(match);
+    return duration ? [{ ...duration, index: match.index, text: match[0] }] : [];
+  });
+  const implicit = IMPLICIT_DURATION.flatMap(({ pattern, value, unit }) =>
+    [...sentence.matchAll(pattern)].map((match) => ({ value, unit, index: match.index, text: match[0] })));
+  return [...explicit, ...implicit].sort((left, right) => left.index - right.index);
+}
+
+export function percentsIn(sentence: string): NumberMention[] {
+  return [...sentence.matchAll(PERCENT)].map((match) => ({ value: numeric(match[1]!), index: match.index, text: match[0] }));
+}
+
 // "החודשיים" (monthly) has a double yod; "החודשים" (the months, as in "for the first three months")
 // does not, and must not read as a monthly amount.
 // "החודשיים" (monthly) has a double yod; "החודשים" (the months, as in "for the first three months")
 // does not, and must not read as a monthly amount.
 const MONTHLY_MARKER = /(?<![\p{L}])(?:ה)?חודשי(?:ים|ות|ת)?(?![\p{L}])|לחודש|בכל\s+חודש|monthly|per\s+month/iu;
-const OPTION_MARKER = /אופציה|תקופה\s+נוספת|התקופה\s+הנוספת|תקופת\s+ההארכה|הארכת\s+(?:ה)?(?:שכירות|חוזה|הסכם)/u;
+const OPTION_MARKER = /אופציה|תקופה\s+(?:ה)?נוספת|התקופה\s+הנוספת|תקופת\s+ההארכה|הארכת\s+(?:ה)?(?:שכירות|חוזה|הסכם)|הארכה/u;
 const PREPAYMENT_MARKER = /מראש|(?<![\p{L}])ל\S*\s+החודשים\s+הראשונים|עבור\s+(?:\d+|\S+)\s+חודשים|בעת\s+החתימה/u;
 const SECURITY_RETURN = /(?:יוחזר(?:ו)?|תוחזר(?:נה)?|יושב(?:ו)?|תושב|השבת|החזרת|להחזיר)/u;
 
