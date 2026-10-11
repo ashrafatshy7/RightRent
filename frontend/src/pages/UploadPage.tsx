@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, FileText, LockKeyhole, ScanLine, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileText, GitCompareArrows, LockKeyhole, ScanLine, UploadCloud, X } from "lucide-react";
 import { useRef, useState, type DragEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { PageHeader } from "../components/PageHeader";
@@ -23,15 +23,33 @@ export function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [contract, setContract] = useState<UploadedContract | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  // A revised version of a contract analyzed before: it continues that contract's version history,
+  // is analyzed with the same preferences as the version it replaces (so differences come from the
+  // contract, not from changed preferences), and opens straight into the comparison.
+  const [searchParams] = useSearchParams();
+  const previousContractId = searchParams.get("previous") ?? undefined;
+  const fromAnalysisId = searchParams.get("from") ?? undefined;
   const preferences = useQuery({ queryKey: ["preferences"], queryFn: () => api.getPreferences(token!) });
+  const baseAnalysis = useQuery({
+    queryKey: ["analysis", fromAnalysisId],
+    queryFn: () => api.getAnalysis(token!, fromAnalysisId!),
+    enabled: Boolean(fromAnalysisId),
+  });
   const upload = useMutation({
-    mutationFn: (selected: File) => api.uploadContract(token!, selected),
+    mutationFn: (selected: File) => api.uploadContract(token!, selected, previousContractId),
     onSuccess: ({ contract: uploaded }) => setContract(uploaded),
   });
   const analyze = useMutation({
-    mutationFn: (contractId: string) => api.analyzeContract(token!, contractId, preferences.data?.preferences),
-    onSuccess: ({ analysis }) => navigate(ROUTES.analysis(analysis.analysisId)),
+    mutationFn: (contractId: string) => api.analyzeContract(
+      token!,
+      contractId,
+      baseAnalysis.data?.analysis.preferencesSnapshot ?? preferences.data?.preferences,
+    ),
+    onSuccess: ({ analysis }) => navigate(fromAnalysisId && previousContractId
+      ? ROUTES.compare(fromAnalysisId, analysis.analysisId)
+      : ROUTES.analysis(analysis.analysisId)),
   });
+  const isNewVersion = Boolean(previousContractId && fromAnalysisId);
 
   function choose(selected?: File) {
     if (!selected) return;
@@ -52,7 +70,10 @@ export function UploadPage() {
 
   return (
     <div className="page-wrap narrow-page">
-      <PageHeader eyebrow="בדיקה חדשה" title="החוזה נכנס. הבהירות יוצאת." description="מעלים PDF אחד, אנחנו מחלצים את הסעיפים ומכינים אותו לניתוח בטוח." />
+      {isNewVersion
+        ? <PageHeader eyebrow="גרסה חדשה של החוזה" title="מה המשכיר שינה?" description="מעלים את הגרסה המתוקנת, מנתחים אותה עם אותן העדפות, ומשווים סעיף מול סעיף לגרסה הקודמת." />
+        : <PageHeader eyebrow="בדיקה חדשה" title="החוזה נכנס. הבהירות יוצאת." description="מעלים PDF אחד, אנחנו מחלצים את הסעיפים ומכינים אותו לניתוח בטוח." />}
+      {isNewVersion ? <div className="version-banner"><GitCompareArrows size={18} /><p>הקובץ יישמר כגרסה חדשה של החוזה שבדקתם, ובסיום הניתוח תראו מה תוקן, מה נשאר, ומה השתנה בלי שביקשתם.</p></div> : null}
       {error ? <ErrorNotice message={error} /> : null}
       {!contract ? (
         <section className="upload-workspace">
@@ -72,10 +93,10 @@ export function UploadPage() {
           <div className="result-seal"><CheckCircle2 size={34} /></div>
           <span className="eyebrow">החילוץ הושלם</span><h2>{contract.originalFileName}</h2><p>החוזה מוכן לניתוח מול ההעדפות ומאגר החקיקה המאומת.</p>
           <div className="extraction-metrics">
-            <div><strong>{contract.pageCount}</strong><span>עמודים</span></div><div><strong>{contract.clauseCount}</strong><span>סעיפים</span></div><div><strong>{formatDuration(contract.extractionMs)}</strong><span>זמן חילוץ</span></div><div><strong>{contract.isScanned ? "OCR" : "טקסט"}</strong><span>סוג מסמך</span></div>
+            <div><strong>{contract.pageCount}</strong><span>עמודים</span></div><div><strong>{contract.clauseCount}</strong><span>סעיפים</span></div><div><strong>{formatDuration(contract.extractionMs)}</strong><span>זמן חילוץ</span></div><div><strong>{contract.isScanned ? "OCR" : "טקסט"}</strong><span>סוג מסמך</span></div>{contract.version > 1 ? <div><strong>{contract.version}</strong><span>גרסה</span></div> : null}
           </div>
           {contract.isScanned ? <div className="scan-note"><ScanLine size={18} /> זוהו {contract.scannedPages.length} עמודים סרוקים ועברו OCR.</div> : null}
-          <div className="result-actions"><button className="ghost-button" type="button" onClick={() => { setContract(null); setFile(null); }}>בחירת קובץ אחר</button><button className="primary-button" type="button" disabled={analyze.isPending || preferences.isLoading} onClick={() => analyze.mutate(contract.id)}>{analyze.isPending ? "מנתחים — זה עשוי לקחת עד 90 שניות…" : "התחלת ניתוח החוזה"}<ArrowLeft size={18} /></button></div>
+          <div className="result-actions"><button className="ghost-button" type="button" onClick={() => { setContract(null); setFile(null); }}>בחירת קובץ אחר</button><button className="primary-button" type="button" disabled={analyze.isPending || preferences.isLoading || (Boolean(fromAnalysisId) && baseAnalysis.isLoading)} onClick={() => analyze.mutate(contract.id)}>{analyze.isPending ? "מנתחים — זה עשוי לקחת עד 90 שניות…" : "התחלת ניתוח החוזה"}<ArrowLeft size={18} /></button></div>
         </section>
       )}
     </div>

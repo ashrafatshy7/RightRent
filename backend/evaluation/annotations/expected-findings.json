@@ -218,6 +218,127 @@
         "present": false,
         "mustBeIgnored": false
       }
+    },
+    {
+      "id": "RR-EVAL-006",
+      "contractPath": "contracts/synthetic/RR-EVAL-006-cross-clause-links.txt",
+      "preferenceProfileId": "PREF-DEFAULT",
+      "requiredClauseIds": [
+        "C001",
+        "C002",
+        "C003",
+        "C004",
+        "C005",
+        "C006",
+        "C007",
+        "C008",
+        "C009",
+        "C010"
+      ],
+      "findings": [
+        {
+          "clauseId": "C008",
+          "severity": "RED",
+          "category": "legal_compliance",
+          "topic": "guarantee_security",
+          "legalAssessment": {
+            "violatesLaw": true,
+            "riskWarning": false,
+            "preferenceConflict": false
+          },
+          "legalReferenceIds": [
+            "IL-RLL-25Y-SECURITY-CAP"
+          ],
+          "reason": "The 25,000 ILS guarantee exceeds the cap of min(7,000 x 24 / 3, 3 x 7,000) = 21,000 ILS. The monthly rent is defined four sections away, after a 21,000 ILS prepayment for three months and before a 7,500 ILS option-period rent; neither of those may be read as the monthly rent."
+        },
+        {
+          "clauseId": "C010",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "legalAssessment": {
+            "violatesLaw": false,
+            "riskWarning": true,
+            "preferenceConflict": false
+          },
+          "legalReferenceIds": [],
+          "reason": "Notwithstanding section 6, the tenant bears all repairs including urgent ones, cancelling the landlord's urgent-repair duty stated in section 6."
+        },
+        {
+          "clauseId": "C006",
+          "severity": "ORANGE",
+          "category": "contractual_risk",
+          "legalAssessment": {
+            "violatesLaw": false,
+            "riskWarning": true,
+            "preferenceConflict": false
+          },
+          "legalReferenceIds": [],
+          "reason": "Read alone the three-day urgent-repair duty is compliant, but section 10 overrides it and shifts all repairs onto the tenant, so the protection cannot be relied on."
+        },
+        {
+          "clauseId": "C004",
+          "severity": "OK",
+          "category": "informational",
+          "legalAssessment": {
+            "violatesLaw": false,
+            "riskWarning": false,
+            "preferenceConflict": false
+          },
+          "legalReferenceIds": [],
+          "reason": "A 7,000 ILS monthly rent is within the default profile's budget."
+        }
+      ],
+      "expectedLinks": [
+        {
+          "from": "C008",
+          "to": "C004",
+          "relation": "DEFINES_VALUE",
+          "reason": "The guarantee cap depends on the monthly rent defined in section 4."
+        },
+        {
+          "from": "C008",
+          "to": "C002",
+          "relation": "DEFINES_VALUE",
+          "reason": "The guarantee cap depends on the lease term defined in section 2."
+        },
+        {
+          "from": "C010",
+          "to": "C006",
+          "relation": "OVERRIDES",
+          "reason": "Section 10 applies notwithstanding section 6."
+        },
+        {
+          "from": "C006",
+          "to": "C010",
+          "relation": "OVERRIDDEN_BY",
+          "reason": "Section 6's protection is cancelled by section 10."
+        },
+        {
+          "from": "C009",
+          "to": "C008",
+          "relation": "REFERENCES",
+          "reason": "Section 9 is subject to section 8."
+        }
+      ],
+      "unexpectedLinks": [
+        {
+          "from": "C008",
+          "to": "C003",
+          "reason": "A three-month prepayment is not the monthly rent."
+        }
+      ],
+      "missingProtectionIds": [
+        "RR-REC-EARLY-TERMINATION",
+        "RR-REC-WEAR-AND-TEAR"
+      ],
+      "privacy": {
+        "rawValuesThatMustBeAbsent": [],
+        "requiredPlaceholders": []
+      },
+      "promptInjection": {
+        "present": false,
+        "mustBeIgnored": false
+      }
     }
   ]
 }

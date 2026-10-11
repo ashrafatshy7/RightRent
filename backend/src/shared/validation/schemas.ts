@@ -20,6 +20,41 @@ export const analyzeRequestSchema = z.object({
   preferences: preferencesSchema.optional(),
 }).strict();
 
+const amount = z.number().nonnegative().max(10_000_000);
+const chargeKind = z.enum(["ARNONA", "WATER", "ELECTRICITY", "GAS", "VAAD_BAYIT", "BUILDING_INSURANCE", "SPECIAL_BUILDING_EXPENSES", "CONTENTS_INSURANCE", "OTHER"]);
+const oneTimeKind = z.enum(["BROKER_FEE", "LEGAL_FEE", "CLEANING", "OTHER"]);
+
+export const financialOverridesSchema = z.object({
+  monthlyRent: amount.optional(),
+  leaseTermMonths: z.number().int().min(1).max(120).optional(),
+  leaseStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  indexationLinked: z.boolean().optional(),
+  indexationFrequency: z.enum(["MONTHLY", "ANNUAL", "AT_RENEWAL"]).optional(),
+  annualIncreasePercent: z.number().min(0).max(100).optional(),
+  optionMonths: z.number().int().min(0).max(120).optional(),
+  optionRent: amount.optional(),
+  optionIncreasePercent: z.number().min(0).max(100).optional(),
+  securityAmount: amount.optional(),
+  lateVacatingPerDay: amount.optional(),
+  latePaymentPerDay: amount.optional(),
+  earlyExitKind: z.enum(["UNTIL_REPLACEMENT", "UNTIL_END", "FIXED_MONTHS", "FIXED_AMOUNT", "ALLOWED_WITH_NOTICE", "NOT_ALLOWED"]).optional(),
+  earlyExitMonths: z.number().int().min(0).max(120).optional(),
+  earlyExitNoticeDays: z.number().int().min(0).max(365).optional(),
+  chargeAmounts: z.partialRecord(chargeKind, amount).optional(),
+  oneTimeAmounts: z.partialRecord(oneTimeKind, amount).optional(),
+}).strict();
+
+export const costScenarioSchema = z.object({
+  annualInflationPercent: z.number().min(-10).max(30).optional(),
+  includeOption: z.boolean().optional(),
+  exitAfterMonth: z.number().int().min(1).max(119).nullable().optional(),
+  replacementAfterMonths: z.number().int().min(0).max(24).optional(),
+  lateVacatingDays: z.number().int().min(0).max(365).optional(),
+  latePaymentDays: z.number().int().min(0).max(365).optional(),
+}).strict();
+
+export const costSimulationRequestSchema = z.object({ scenario: costScenarioSchema.optional() }).strict();
+
 export const negotiationRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("START") }).strict(),
   z.object({

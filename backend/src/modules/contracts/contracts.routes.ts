@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { env } from "../../config/env.js";
 import { getStore } from "../../shared/data/store.js";
 import { HttpError } from "../../shared/http/http-error.js";
 import { parse } from "../../shared/validation/parse.js";
@@ -15,6 +18,26 @@ export const contractsRouter = Router();
 
 contractsRouter.use(requireAuthentication);
 contractsRouter.post("/upload", parseContractUpload, uploadContract);
+
+// The original, unmarked PDF, for the in-browser viewer that draws its own interactive highlights.
+contractsRouter.get("/:id/file", async (request, response) => {
+  const contract = await (await getStore()).getContract(request.params.id);
+  if (!contract || contract.userId !== request.auth!.userId) {
+    throw new HttpError(404, "CONTRACT_NOT_FOUND", "The contract was not found.");
+  }
+  const filePath = path.join(env.uploadDirectory, contract.storageKey);
+  try {
+    await access(filePath);
+  } catch {
+    throw new HttpError(404, "CONTRACT_FILE_NOT_FOUND", "The contract file is no longer available.");
+  }
+  response.type("application/pdf");
+  response.setHeader("Cache-Control", "private, no-store");
+  response.setHeader("Content-Disposition", `inline; filename="rightrent-contract-${contract.id}.pdf"`);
+  // `root` keeps send's dotfile guard on the stored file name only, not on the configured directory
+  // (which may legitimately sit under a dot-directory, e.g. a worktree in .claude/).
+  response.sendFile(contract.storageKey, { root: env.uploadDirectory });
+});
 contractsRouter.post("/:id/analyze", async (request, response) => {
   const body = parse(analyzeRequestSchema, request.body);
   const user = await (await getStore()).findUserById(request.auth!.userId);

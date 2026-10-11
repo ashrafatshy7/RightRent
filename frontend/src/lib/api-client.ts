@@ -2,6 +2,13 @@ import { API_BASE_URL, API_PATHS } from "../config/app";
 import type {
   Analysis,
   AuthResponse,
+  ContractComparison,
+  HistoryAnalysis,
+  CostInputs,
+  CostScenario,
+  CostSimulation,
+  CpiSnapshot,
+  FinancialOverrides,
   LawApproval,
   LawSourceState,
   PublicUser,
@@ -135,14 +142,30 @@ export const api = Object.freeze({
     { method: "PUT", body: JSON.stringify(preferences) },
     token,
   ),
-  uploadContract: (token: string, file: File) => {
+  uploadContract: (token: string, file: File, previousContractId?: string) => {
     const body = new FormData();
+    if (previousContractId) body.append("previousContractId", previousContractId);
     body.append("contract", file);
     return request<{ contract: UploadedContract }>(API_PATHS.uploadContract, { method: "POST", body }, token);
   },
   analyzeContract: analyzeWithConsoleProgress,
   getAnalysis: (token: string, analysisId: string) => request<{ analysis: Analysis }>(API_PATHS.analysis(analysisId), {}, token),
-  getHistory: (token: string) => request<{ analyses: Analysis[] }>(API_PATHS.history, {}, token),
+  getHistory: (token: string) => request<{ analyses: HistoryAnalysis[] }>(API_PATHS.history, {}, token),
+  getComparison: (token: string, baseAnalysisId: string, targetAnalysisId: string) => request<{ comparison: ContractComparison }>(
+    API_PATHS.comparison(baseAnalysisId, targetAnalysisId),
+    {},
+    token,
+  ),
+  simulateCost: (token: string, analysisId: string, scenario?: Partial<CostScenario>) => request<{ simulation: CostSimulation; inputs: CostInputs; cpi: CpiSnapshot }>(
+    API_PATHS.costSimulation(analysisId),
+    { method: "POST", body: JSON.stringify(scenario ? { scenario } : {}) },
+    token,
+  ),
+  saveFinancialOverrides: (token: string, analysisId: string, overrides: FinancialOverrides) => request<{ financialOverrides: FinancialOverrides }>(
+    API_PATHS.financialOverrides(analysisId),
+    { method: "PUT", body: JSON.stringify(overrides) },
+    token,
+  ),
   deleteHistory: (token: string, analysisId: string) => request<void>(API_PATHS.historyItem(analysisId), { method: "DELETE" }, token),
   getReadiness: () => request<Readiness>(API_PATHS.readiness, {}, undefined, [503]),
   getLawStatus: (token: string) => request<{ laws: LawSourceState[] }>(API_PATHS.adminLawStatus, {}, token),
@@ -157,6 +180,14 @@ export const api = Object.freeze({
     token,
   ),
   markedPdfUrl: (analysisId: string) => `${API_BASE_URL}${API_PATHS.markedPdf(analysisId)}`,
+  // Fetched with the bearer token (never a token in the URL) and handed to pdf.js as bytes.
+  getContractFile: async (token: string, contractId: string) => {
+    const response = await fetch(`${API_BASE_URL}${API_PATHS.contractFile(contractId)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new ApiError(response.status, "CONTRACT_FILE_FAILED", "לא ניתן לטעון את החוזה המקורי.");
+    return response.arrayBuffer();
+  },
   getMarkedPdf: async (token: string, analysisId: string) => {
     const response = await fetch(`${API_BASE_URL}${API_PATHS.markedPdf(analysisId)}`, {
       headers: { authorization: `Bearer ${token}` },

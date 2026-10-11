@@ -3,6 +3,7 @@ import { env } from "../../config/env.js";
 import type {
   AnalysisRecord,
   ContractRecord,
+  FinancialOverrides,
   LawEmbeddingRecord,
   LawSourceState,
   LawSourceStatus,
@@ -25,12 +26,15 @@ export interface DataStore {
   getContract(id: string): Promise<ContractRecord | null>;
   updateContract(contract: ContractRecord): Promise<void>;
   deleteContract(id: string): Promise<void>;
+  // When a version is deleted, the versions that pointed to it no longer have a previous version.
+  unlinkPreviousContract(previousContractId: string): Promise<void>;
   createAnalysis(analysis: AnalysisRecord): Promise<void>;
   getAnalysis(id: string): Promise<AnalysisRecord | null>;
   findAnalysisByInput(contractId: string, analysisInputHash: string): Promise<AnalysisRecord | null>;
   countAnalysesByContract(contractId: string): Promise<number>;
   listAnalyses(userId: string): Promise<AnalysisRecord[]>;
   deleteAnalysis(id: string): Promise<boolean>;
+  saveFinancialOverrides(analysisId: string, overrides: FinancialOverrides): Promise<boolean>;
   getNegotiation(analysisId: string): Promise<NegotiationRecord | null>;
   upsertNegotiation(negotiation: NegotiationRecord): Promise<void>;
   deleteNegotiation(analysisId: string): Promise<void>;
@@ -122,6 +126,14 @@ export class MemoryDataStore implements DataStore {
     this.contracts.delete(id);
   }
 
+  async unlinkPreviousContract(previousContractId: string) {
+    for (const [id, contract] of this.contracts) {
+      if (contract.previousContractId !== previousContractId) continue;
+      const { previousContractId: _removed, ...rest } = contract;
+      this.contracts.set(id, rest);
+    }
+  }
+
   async createAnalysis(analysis: AnalysisRecord) {
     this.analyses.set(analysis.analysisId, structuredClone(analysis));
   }
@@ -150,6 +162,13 @@ export class MemoryDataStore implements DataStore {
 
   async deleteAnalysis(id: string) {
     return this.analyses.delete(id);
+  }
+
+  async saveFinancialOverrides(analysisId: string, overrides: FinancialOverrides) {
+    const analysis = this.analyses.get(analysisId);
+    if (!analysis) return false;
+    this.analyses.set(analysisId, { ...analysis, financialOverrides: structuredClone(overrides) });
+    return true;
   }
 
   async getNegotiation(analysisId: string) {
@@ -411,6 +430,12 @@ class MongoDataStore implements DataStore {
   async deleteContract(id: string) {
     await this.collection<ContractRecord>("contracts").deleteOne({ id });
   }
+  async unlinkPreviousContract(previousContractId: string) {
+    await this.collection<ContractRecord>("contracts").updateMany(
+      { previousContractId },
+      { $unset: { previousContractId: "" } },
+    );
+  }
   async createAnalysis(analysis: AnalysisRecord) {
     await this.collection<AnalysisRecord>("analyses").insertOne(analysis);
   }
@@ -432,6 +457,13 @@ class MongoDataStore implements DataStore {
   async deleteAnalysis(id: string) {
     return (await this.collection<AnalysisRecord>("analyses").deleteOne({ analysisId: id }))
       .deletedCount === 1;
+  }
+  async saveFinancialOverrides(analysisId: string, overrides: FinancialOverrides) {
+    const result = await this.collection<AnalysisRecord>("analyses").updateOne(
+      { analysisId },
+      { $set: { financialOverrides: overrides } },
+    );
+    return result.matchedCount === 1;
   }
   async getNegotiation(analysisId: string) {
     return this.collection<NegotiationRecord>("negotiations").findOne({ analysisId });

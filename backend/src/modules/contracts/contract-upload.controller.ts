@@ -29,6 +29,14 @@ export const uploadContract: RequestHandler = async (request, response) => {
     );
   }
 
+  // A revised version of a contract the tenant already uploaded continues its version history.
+  const store = await getStore();
+  const previousContractId = typeof request.body?.previousContractId === "string" ? request.body.previousContractId.trim() : "";
+  const previous = previousContractId ? await store.getContract(previousContractId) : null;
+  if (previousContractId && (!previous || previous.userId !== request.auth!.userId)) {
+    throw new HttpError(404, "PREVIOUS_CONTRACT_NOT_FOUND", "The previous version of this contract was not found.");
+  }
+
   const contractId = randomUUID();
   const storedFileName = `${contractId}.pdf`;
   const uploadedAt = new Date().toISOString();
@@ -52,12 +60,17 @@ export const uploadContract: RequestHandler = async (request, response) => {
     isScanned: extraction.isScanned,
     extractionMs: extraction.extractionMs,
     clauses: extraction.clauses,
+    ...(previous ? {
+      previousContractId: previous.id,
+      rootContractId: previous.rootContractId ?? previous.id,
+      version: (previous.version ?? 1) + 1,
+    } : {}),
     uploadedAt,
     updatedAt: uploadedAt,
   };
 
   try {
-    await (await getStore()).createContract(contract);
+    await store.createContract(contract);
   } catch (error) {
     const { rm } = await import("node:fs/promises");
     await rm(path.join(env.uploadDirectory, storedFileName), { force: true });
@@ -76,6 +89,8 @@ export const uploadContract: RequestHandler = async (request, response) => {
       pageCount: extraction.pageCount,
       clauseCount: contract.clauses.length,
       extractionMs: extraction.extractionMs,
+      version: contract.version ?? 1,
+      previousContractId: contract.previousContractId ?? null,
       uploadedAt,
     },
   });

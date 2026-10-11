@@ -108,6 +108,13 @@ for (const evaluationCase of annotations.cases) {
     `${evaluationCase.id} requiredClauseIds do not match the contract fixture.`,
   );
 
+  for (const link of [...(evaluationCase.expectedLinks ?? []), ...(evaluationCase.unexpectedLinks ?? [])]) {
+    check(
+      fixtureClauseIds.includes(link.from) && fixtureClauseIds.includes(link.to) && link.from !== link.to,
+      `${evaluationCase.id} link ${link.from} -> ${link.to} references an unknown or identical clause.`,
+    );
+  }
+
   for (const finding of evaluationCase.findings) {
     check(
       fixtureClauseIds.includes(finding.clauseId),

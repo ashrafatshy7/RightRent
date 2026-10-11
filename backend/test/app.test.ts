@@ -27,16 +27,15 @@ const analysisSchema = JSON.parse(
 );
 const validateAnalysis = ajv.compile(analysisSchema);
 
-async function createContractPdf() {
+async function createContractPdf(lines = [
+  "[C001]",
+  "Lease term is 12 months. Monthly rent is ILS 6000.",
+  "[C002]",
+  "The tenant shall provide a bank guarantee of ILS 30000.",
+]) {
   const document = await PDFDocument.create();
   const font = await document.embedFont(StandardFonts.Helvetica);
   const page = document.addPage([595, 842]);
-  const lines = [
-    "[C001]",
-    "Lease term is 12 months. Monthly rent is ILS 6000.",
-    "[C002]",
-    "The tenant shall provide a bank guarantee of ILS 30000.",
-  ];
   lines.forEach((line, index) => page.drawText(line, { x: 50, y: 780 - index * 28, size: 12, font }));
   const bytes = await document.save();
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -207,6 +206,22 @@ test("POST /api/contracts/upload validates and extracts a PDF", async () => {
   contractId = body.contract.id;
 });
 
+test("the original contract PDF is served only to its owner", async () => {
+  assert.ok(contractId);
+  const owned = await fetch(`${baseUrl}/api/contracts/${contractId}/file`, authenticated());
+  assert.equal(owned.status, 200);
+  assert.equal(owned.headers.get("content-type"), "application/pdf");
+  assert.equal(owned.headers.get("cache-control"), "private, no-store");
+  const bytes = new Uint8Array(await owned.arrayBuffer());
+  assert.equal(new TextDecoder().decode(bytes.subarray(0, 5)), "%PDF-");
+
+  const foreign = await fetch(`${baseUrl}/api/contracts/${contractId}/file`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(foreign.status, 404);
+  assert.equal((await foreign.json()).error.code, "CONTRACT_NOT_FOUND");
+});
+
 test("contract upload rejects missing, mislabeled, and malformed files", async () => {
   const missing = await fetch(`${baseUrl}/api/contracts/upload`, authenticated({ method: "POST", body: new FormData() }));
   assert.equal(missing.status, 400);
@@ -238,12 +253,126 @@ test("analysis returns deterministic legal findings and a marked PDF", async () 
   assert.equal(validateAnalysis(body.analysis), true, JSON.stringify(validateAnalysis.errors));
   assert.equal(body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002").severity, "RED");
   assert.equal(body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002").legalReferences[0].lawReferenceId, "IL-RLL-25Y-SECURITY-CAP");
+  // The guarantee was judged together with the clause that defines the rent and term it is capped by.
+  const guarantee = body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002");
+  assert.equal(body.analysis.clauseLinking, true);
+  assert.deepEqual(guarantee.deterministicChecks[0].sourceClauseIds, ["C001"]);
+  const rentLink = guarantee.contextClauses.find((link: { clauseId: string }) => link.clauseId === "C001");
+  assert.equal(rentLink.relation, "DEFINES_VALUE");
+  assert.equal(rentLink.usedInAnalysis, true);
   analysisId = body.analysis.analysisId;
 
   const marked = await fetch(`${baseUrl}/api/analyses/${analysisId}/marked-pdf`, authenticated());
   assert.equal(marked.status, 200);
   assert.equal(marked.headers.get("content-type"), "application/pdf");
   assert.ok((await marked.arrayBuffer()).byteLength > 100);
+});
+
+test("the cost simulator runs on the analysis's terms and the tenant's saved corrections", async () => {
+  assert.ok(analysisId);
+  const json = { "content-type": "application/json" };
+  const simulate = (scenario: object) => fetch(`${baseUrl}/api/analyses/${analysisId}/cost-simulation`, authenticated({
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ scenario }),
+  }));
+
+  let response = await simulate({ annualInflationPercent: 0 });
+  assert.equal(response.status, 200);
+  let body = await response.json();
+  assert.equal(body.simulation.ready, true);
+  assert.equal(body.simulation.totals.total, 72_000);
+  assert.equal(body.cpi.source, "ASSUMPTION");
+
+  response = await fetch(`${baseUrl}/api/analyses/${analysisId}/financial-overrides`, authenticated({
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ monthlyRent: 5_000 }),
+  }));
+  assert.equal(response.status, 200);
+  // The contract says nothing about leaving early, so leaving after six months is priced at the
+  // worst case: rent until the end of the term.
+  body = await (await simulate({ annualInflationPercent: 0, exitAfterMonth: 6 })).json();
+  assert.equal(body.simulation.totals.total, 60_000);
+  assert.equal(body.simulation.lines.find((line: { id: string }) => line.id === "early-exit").amount, 30_000);
+  const saved = await (await fetch(`${baseUrl}/api/analyses/${analysisId}`, authenticated())).json();
+  assert.deepEqual(saved.analysis.financialOverrides, { monthlyRent: 5_000 });
+
+  const invalid = await fetch(`${baseUrl}/api/analyses/${analysisId}/financial-overrides`, authenticated({
+    method: "PUT",
+    headers: json,
+    body: JSON.stringify({ monthlyRent: -1 }),
+  }));
+  assert.equal(invalid.status, 400);
+  const foreign = await fetch(`${baseUrl}/api/analyses/${analysisId}/cost-simulation`, {
+    method: "POST",
+    headers: { ...json, authorization: `Bearer ${adminToken}` },
+    body: "{}",
+  });
+  assert.equal(foreign.status, 404);
+});
+
+test("a revised contract is uploaded as a new version and compared with the previous one", async () => {
+  assert.ok(contractId && analysisId);
+  const upload = async (lines: string[], previous?: string, as = token) => {
+    const form = new FormData();
+    if (previous) form.append("previousContractId", previous);
+    form.append("contract", new Blob([await createContractPdf(lines)], { type: "application/pdf" }), "revised.pdf");
+    return fetch(`${baseUrl}/api/contracts/upload`, { method: "POST", headers: { authorization: `Bearer ${as}` }, body: form });
+  };
+  const analyze = async (id: string) => (await (await fetch(`${baseUrl}/api/contracts/${id}/analyze`, authenticated({
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ confirmPreferences: true }),
+  }))).json()).analysis.analysisId as string;
+
+  // The landlord lowered the guarantee to the legal cap and added a clause.
+  const revised = await upload([
+    "[C001]",
+    "Lease term is 12 months. Monthly rent is ILS 6000.",
+    "[C002]",
+    "The tenant shall provide a bank guarantee of ILS 18000.",
+    "[C003]",
+    "The tenant shall pay the building committee fees.",
+  ], contractId);
+  assert.equal(revised.status, 201);
+  const revisedContract = (await revised.json()).contract;
+  assert.equal(revisedContract.version, 2);
+  assert.equal(revisedContract.previousContractId, contractId);
+  const revisedAnalysisId = await analyze(revisedContract.id);
+
+  const response = await fetch(`${baseUrl}/api/comparisons/${analysisId}/${revisedAnalysisId}`, authenticated());
+  assert.equal(response.status, 200);
+  const { comparison } = await response.json();
+  assert.equal(comparison.target.version, 2);
+  const fixed = comparison.items.find((item: { status: string }) => item.status === "FIXED");
+  assert.deepEqual(fixed.numberChanges, [{ before: "30000", after: "18000" }]);
+  assert.ok(comparison.items.some((item: { change: string; after: { clauseIds: string[] } }) => item.change === "ADDED" && item.after.clauseIds[0] === "C003"));
+
+  const history = await (await fetch(`${baseUrl}/api/history`, authenticated())).json();
+  const listed = history.analyses.find((item: { analysisId: string }) => item.analysisId === revisedAnalysisId);
+  assert.deepEqual(
+    [listed.contract.version, listed.contract.rootContractId, listed.contract.previousContractId],
+    [2, contractId, contractId],
+  );
+
+  // A contract that is not a version of this one cannot be compared with it.
+  const unrelated = await upload(["[C001]", "Monthly rent is ILS 5000."]);
+  const unrelatedAnalysisId = await analyze((await unrelated.json()).contract.id);
+  const mismatch = await fetch(`${baseUrl}/api/comparisons/${analysisId}/${unrelatedAnalysisId}`, authenticated());
+  assert.equal(mismatch.status, 409);
+  // Another tenant can neither compare these analyses nor attach a version to this contract.
+  const foreign = await fetch(`${baseUrl}/api/comparisons/${analysisId}/${revisedAnalysisId}`, {
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert.equal(foreign.status, 404);
+  const foreignVersion = await upload(["[C001]", "Monthly rent is ILS 5000."], contractId, adminToken);
+  assert.equal(foreignVersion.status, 404);
+  assert.equal((await foreignVersion.json()).error.code, "PREVIOUS_CONTRACT_NOT_FOUND");
+
+  for (const id of [revisedAnalysisId, unrelatedAnalysisId]) {
+    assert.equal((await fetch(`${baseUrl}/api/history/${id}`, authenticated({ method: "DELETE" }))).status, 204);
+  }
 });
 
 test("analysis cache includes the confirmed preference snapshot", async () => {

@@ -19,6 +19,13 @@ export function formatDuration(milliseconds: number) {
   return milliseconds < 1_000 ? `${Math.round(milliseconds)} מ״ש` : `${(milliseconds / 1_000).toFixed(1)} שנ׳`;
 }
 
+// The contract's own label for a clause ("סעיף 9 · בטוחות"), falling back to the positional ID for
+// clauses without a numbered heading and for analyses saved before labels were extracted.
+export function clauseLabel(clause: { clauseId: string; sectionLabel?: string; heading?: string }) {
+  if (!clause.sectionLabel) return clause.clauseId;
+  return clause.heading ? `סעיף ${clause.sectionLabel} · ${clause.heading}` : `סעיף ${clause.sectionLabel}`;
+}
+
 export function shortHash(value: string | null | undefined) {
   return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "—";
 }

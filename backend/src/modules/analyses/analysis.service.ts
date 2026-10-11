@@ -4,7 +4,9 @@ import path from "node:path";
 import { env } from "../../config/env.js";
 import type {
   AnalysisRecord,
+  AnalysisResult,
   ConfidenceLevel,
+  FinancialTerms,
   ContractClause,
   ContractRecord,
   DeterministicCheck,
@@ -21,13 +23,23 @@ import {
   analyzeProtectionsWithClaude,
   analyzeWithClaude,
   embedText,
+  embedTexts,
+  extractFinancialTermsWithClaude,
+  FINANCIAL_REQUEST_FINGERPRINT,
   PROTECTION_REQUEST_FINGERPRINT,
   VERDICT_REQUEST_FINGERPRINT,
   type ProviderVerdict,
+  type RelatedClauseContext,
 } from "./ai-providers.js";
 import { traceAnalysis, traceAnalysisFailure } from "./analysis-logger.js";
 import { redactClauses } from "./anonymization.service.js";
 import { categoryForAssessment, classifyClause, isSubstantiveClause, resolveClauseQuote } from "./classification.js";
+import { linkClauses, type ClauseGraph, type ClauseLink } from "./clause-linking.service.js";
+import {
+  extractFinancialTermsDeterministically,
+  fromModelTerms,
+  mergeFinancialTerms,
+} from "./financial-terms.service.js";
 import {
   computeDeterministicChecks,
   DETERMINISTIC_RULE_LAW_INFO,
@@ -45,7 +57,7 @@ import {
 // The schema/logic version behind AnalysisResult and Finding, folded into analysisInputHash below
 // so that a change here always produces a fresh analysis instead of returning a previously saved
 // record in the old shape (see findAnalysisByInput).
-const ANALYSIS_SCHEMA_VERSION = "1.1.0";
+const ANALYSIS_SCHEMA_VERSION = "1.4.0";
 
 type RetrievedReference = {
   id: string;
@@ -148,12 +160,21 @@ async function reuseOrCompute<T>(store: DataStore, key: string, compute: () => P
 
 async function providerVerdict(
   clause: ContractClause,
-  fullText: string,
+  graph: ClauseGraph,
+  embedding: number[] | undefined,
   store: DataStore,
   scope: AiResultScope,
   useFixture: boolean,
-): Promise<{ verdict: ProviderVerdict; references: RetrievedReference[]; reused: boolean; checks: DeterministicCheck[] }> {
-  const checks = computeDeterministicChecks(clause, fullText, scope.preferences);
+): Promise<{
+  verdict: ProviderVerdict;
+  references: RetrievedReference[];
+  reused: boolean;
+  checks: DeterministicCheck[];
+  links: ClauseLink[];
+}> {
+  const profile = graph.profiles.get(clause.id)!;
+  const links = graph.links.get(clause.id) ?? [];
+  const checks = computeDeterministicChecks(profile, graph.contractFacts);
   if (env.analysisProvider !== "anthropic") {
     // Replays the real Claude output captured once for the known fixture contract (see
     // fixture-analysis.service.ts) instead of spending a live call - useful for frontend work
@@ -161,9 +182,15 @@ async function providerVerdict(
     // didn't cover, falls back to the free deterministic heuristic below.
     if (useFixture) {
       const entry = fixtureVerdict(clause.id);
-      if (entry) return { verdict: entry.verdict, references: entry.references, reused: true, checks };
+      if (entry) return { verdict: entry.verdict, references: entry.references, reused: true, checks, links };
     }
-    const verdict = deterministicVerdict(clause, fullText, scope.preferences);
+    const verdict = deterministicVerdict(clause, {
+      preferences: scope.preferences,
+      profile,
+      contractFacts: graph.contractFacts,
+      links,
+      checks,
+    });
     return {
       verdict,
       references: verdict.legalReferenceIds
@@ -171,27 +198,31 @@ async function providerVerdict(
         .filter((reference): reference is RetrievedReference => Boolean(reference)),
       reused: false,
       checks,
+      links,
     };
   }
-  // `checks` is derived from fullText (other clauses can supply the monthly rent behind this
-  // clause's guarantee cap, for example), which is not otherwise part of this cache key, so it must
-  // be included explicitly - otherwise a later contract whose other clauses changed could reuse a
-  // verdict computed against stale deterministic facts.
+  const relatedClauses: RelatedClauseContext[] = links.map(({ clauseId, relation, reason, excerpt }) =>
+    ({ clauseId, relation, reason, excerpt }));
+  // `checks` and `relatedClauses` come from other clauses (the rent behind this clause's guarantee
+  // cap, the clause that overrides it), which are not otherwise part of this cache key, so they must
+  // be included explicitly - otherwise a later version of the contract whose other clauses changed
+  // could reuse a verdict computed against stale context.
   const key = sha256({
     kind: "clause-verdict",
     request: VERDICT_REQUEST_FINGERPRINT,
     ...scope,
     clauseText: clause.text,
     deterministicChecks: checks,
+    relatedClauses,
   });
   const { value, reused } = await reuseOrCompute(store, key, async () => {
-    const lawSections = await retrieveLawCorpus(await embedText(clause.text), 5);
+    const lawSections = await retrieveLawCorpus(embedding ?? await embedText(clause.text), 5);
     return {
-      verdict: await analyzeWithClaude(clause, lawSections, scope.preferences, checks),
+      verdict: await analyzeWithClaude(clause, lawSections, scope.preferences, checks, relatedClauses),
       references: lawSections.map(chunkReference),
     };
   });
-  return { ...value, reused, checks };
+  return { ...value, reused, checks, links };
 }
 
 function toFinding(
@@ -199,6 +230,7 @@ function toFinding(
   verdict: ProviderVerdict,
   context: RetrievedReference[],
   checks: DeterministicCheck[],
+  links: ClauseLink[],
 ): Finding {
   // A failed deterministic check (a numeric legal limit computed in code, not by the model - see
   // computeDeterministicChecks) always wins: the model can add to it but can never soften it away.
@@ -217,6 +249,14 @@ function toFinding(
     .filter((item): item is RetrievedReference => Boolean(item))
     .map(legalReference);
 
+  // A linked clause counts as used when the verdict cites it or a deterministic fact came from it.
+  const used = new Set([...(verdict.contextClauseIds ?? []), ...checks.flatMap((check) => check.sourceClauseIds ?? [])]);
+  const contextClauses = links.map(({ clauseId, relation, reason }) =>
+    ({ clauseId, relation, reason, usedInAnalysis: used.has(clauseId) }));
+  const linkedIds = new Set(links.map((link) => link.clauseId));
+  const issue = verdict.crossClauseIssue;
+  const issueClauseIds = issue?.clauseIds.filter((id) => linkedIds.has(id)) ?? [];
+
   if (legalAssessment.violatesLaw && references.length === 0) {
     throw new HttpError(
       502,
@@ -226,6 +266,8 @@ function toFinding(
   }
   return {
     clauseId: clause.id,
+    ...(clause.sectionLabel ? { sectionLabel: clause.sectionLabel } : {}),
+    ...(clause.heading ? { heading: clause.heading } : {}),
     severity: classifyClause(legalAssessment),
     category: categoryForAssessment(legalAssessment),
     topic: verdict.topic,
@@ -241,8 +283,28 @@ function toFinding(
     legalReferences: references,
     ...(checks.length ? { deterministicChecks: checks } : {}),
     relatedFindingIds: [],
+    ...(contextClauses.length ? { contextClauses } : {}),
+    ...(issue && issueClauseIds.length ? { crossClauseIssue: { ...issue, clauseIds: issueClauseIds } } : {}),
     locations: clause.locations,
   };
+}
+
+// A conflict between two clauses is usually reported from both of them; it is listed once, with the
+// clauses in document order, at the severity of the most severe finding that reported it.
+function mergeCrossClauseIssues(findings: Finding[], documentOrder: string[]): AnalysisResult["crossClauseIssues"] {
+  const position = (clauseId: string) => documentOrder.indexOf(clauseId);
+  const merged = new Map<string, AnalysisResult["crossClauseIssues"][number]>();
+  for (const finding of findings) {
+    const issue = finding.crossClauseIssue;
+    if (!issue || finding.severity === "OK") continue;
+    const clauseIds = [...new Set([finding.clauseId, ...issue.clauseIds])].sort((left, right) => position(left) - position(right));
+    const key = `${issue.kind}:${clauseIds.join(",")}`;
+    const existing = merged.get(key);
+    if (!existing || SEVERITY_PRIORITY[finding.severity] < SEVERITY_PRIORITY[existing.severity]) {
+      merged.set(key, { kind: issue.kind, clauseIds, explanation: issue.explanation, severity: finding.severity });
+    }
+  }
+  return [...merged.values()].sort((left, right) => SEVERITY_PRIORITY[left.severity] - SEVERITY_PRIORITY[right.severity]);
 }
 
 // Findings about the same underlying topic (e.g. a guarantee's amount, realization terms, and
@@ -332,6 +394,38 @@ async function protectionReport(
   return { protections: value, reused };
 }
 
+// The money terms for the cost simulator: the local rules always, and with the Anthropic provider a
+// Claude reading merged in after every value is checked against its clause. A failed model reading
+// does not fail the analysis - the rules' reading is used and the trace says so.
+async function financialTerms(
+  redactedClauses: ContractClause[],
+  graph: ClauseGraph,
+  store: DataStore,
+  scope: AiResultScope,
+): Promise<FinancialTerms> {
+  const rule = extractFinancialTermsDeterministically(
+    redactedClauses.filter((clause) => graph.profiles.has(clause.id)),
+    graph.profiles,
+    graph.contractFacts,
+  );
+  if (env.analysisProvider !== "anthropic") return rule;
+  const key = sha256({
+    kind: "financial-terms",
+    request: FINANCIAL_REQUEST_FINGERPRINT,
+    userId: scope.userId,
+    clauses: redactedClauses.map(({ id, text }) => ({ id, text })),
+  });
+  try {
+    const { value, reused } = await reuseOrCompute(store, key, () => extractFinancialTermsWithClaude(redactedClauses));
+    const merged = mergeFinancialTerms(rule, fromModelTerms(value, redactedClauses));
+    traceAnalysis(`Financial terms read${reused ? " (reused from an earlier attempt)" : ""}: rent ${merged.monthlyRent?.value ?? "?"}, term ${merged.leaseTermMonths?.value ?? "?"} months, ${merged.charges.length} charges.`);
+    return merged;
+  } catch (error) {
+    traceAnalysis(`Claude could not read the financial terms (${error instanceof Error ? error.message : "unknown error"}); using the local rules only.`, "warn");
+    return rule;
+  }
+}
+
 async function lawCorpusFingerprint(store: DataStore): Promise<LawCorpusFingerprint> {
   if (env.analysisProvider !== "anthropic") return "deterministic-fixture-v1";
   return (await store.listLawSourceStates())
@@ -355,8 +449,16 @@ function analysisInputHash(
     clauses: contract.clauses.map(({ id, text }) => ({ id, text })),
     preferences,
     provider: env.analysisProvider,
+    clauseLinking: env.clauseLinking,
     lawCorpus,
   });
+}
+
+// One embeddings request for every clause: the vectors serve both law retrieval for each clause
+// and the similarity signal for linking. They are computed from the redacted text only.
+async function embedClauses(clauses: ContractClause[]) {
+  const vectors = await embedTexts(clauses.map((clause) => clause.text));
+  return new Map(clauses.map((clause, index) => [clause.id, vectors[index]!]));
 }
 
 export async function analyzeContract(
@@ -415,7 +517,6 @@ export async function analyzeContract(
     const redaction = await redactClauses(contract.clauses);
     const redactionMs = Math.round(performance.now() - redactionStarted);
     traceAnalysis(`Redaction done in ${redactionMs} ms: ${redaction.redactedEntityCount} details removed (${redaction.mode}${redaction.model ? `, ${redaction.model}` : ""}).`);
-    const fullText = redaction.clauses.map((clause) => clause.text).join("\n");
 
     // Headers, page numbers, and other non-substantive clauses (e.g. the document's own title line,
     // which the extractor turns into its own clause) never get a finding of their own - the
@@ -428,6 +529,16 @@ export async function analyzeContract(
       traceAnalysis(`Skipping ${skippedClauseCount} non-substantive clause(s) (headers/page numbers/document title).`);
     }
 
+    // Each clause is analyzed together with the clauses it depends on (the rent behind a guarantee,
+    // a clause that overrides it, the other half of a split section) - see clause-linking.service.ts.
+    stage = "clause linking";
+    const embeddings = env.analysisProvider === "anthropic" ? await embedClauses(analyzableClauses) : null;
+    const graph = linkClauses(analyzableClauses, { embeddings, enabled: env.clauseLinking });
+    const linkCount = [...graph.links.values()].reduce((total, links) => total + links.length, 0);
+    traceAnalysis(env.clauseLinking
+      ? `Linked related clauses: ${linkCount} links across ${analyzableClauses.length} clauses (${embeddings ? "embeddings" : "lexical"} similarity).`
+      : "Clause linking is off (CLAUSE_LINKING=off); each clause is analyzed alone.");
+
     // The protection checklist reads only the redacted clauses, so it runs alongside clause analysis.
     stage = "clause analysis and protection checklist";
     const clauseCount = analyzableClauses.length;
@@ -436,7 +547,7 @@ export async function analyzeContract(
     let completedClauses = 0;
     const verdictsPromise = mapWithConcurrency(analyzableClauses, 3, async (clause) => {
       const clauseStarted = performance.now();
-      const result = await providerVerdict(clause, fullText, store, scope, useFixture);
+      const result = await providerVerdict(clause, graph, embeddings?.get(clause.id), store, scope, useFixture);
       completedClauses += 1;
       const { legalAssessment, legalReferenceIds, title, usage } = result.verdict;
       const cited = legalReferenceIds
@@ -451,6 +562,7 @@ export async function analyzeContract(
           + ` | violatesLaw=${legalAssessment.violatesLaw} riskWarning=${legalAssessment.riskWarning}`
           + ` preferenceConflict=${legalAssessment.preferenceConflict}`
           + ` | laws retrieved ${result.references.length}, cited ${cited.length ? cited.join("; ") : "none"}`
+          + ` | related clauses ${result.links.length ? result.links.map((link) => `${link.clauseId}:${link.relation}`).join(", ") : "none"}`
           + `${cost} | ${Math.round(performance.now() - clauseStarted)} ms`,
       );
       return result;
@@ -468,11 +580,12 @@ export async function analyzeContract(
       );
       return protections;
     })();
-    const [verdicts, protections] = await Promise.all([verdictsPromise, protectionsPromise]);
+    const financialPromise = financialTerms(redaction.clauses, graph, store, scope);
+    const [verdicts, protections, financial] = await Promise.all([verdictsPromise, protectionsPromise, financialPromise]);
     const findings = withRelatedFindingIds(
       analyzableClauses
         .map((clause, index) =>
-          toFinding(clause, verdicts[index]!.verdict, verdicts[index]!.references, verdicts[index]!.checks))
+          toFinding(clause, verdicts[index]!.verdict, verdicts[index]!.references, verdicts[index]!.checks, verdicts[index]!.links))
         .sort(byPriority),
     );
     const incompleteProtections = protections.filter((item) => item.status !== "COVERED");
@@ -508,7 +621,10 @@ export async function analyzeContract(
       headline: computeHeadline(summary),
       keyFindingIds,
       findings,
+      crossClauseIssues: mergeCrossClauseIssues(findings, analyzableClauses.map((clause) => clause.id)),
+      clauseLinking: env.clauseLinking,
       protectionReport: protections,
+      financialTerms: financial,
       missingProtections: incompleteProtections,
       suggestedAdditions: incompleteProtections,
       preferencesSnapshot: structuredClone(preferences),

@@ -13,7 +13,10 @@
     "headline",
     "keyFindingIds",
     "findings",
+    "crossClauseIssues",
+    "clauseLinking",
     "protectionReport",
+    "financialTerms",
     "missingProtections",
     "suggestedAdditions",
     "preferencesSnapshot",
@@ -25,7 +28,7 @@
     "timingMs"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.1.0" },
+    "schemaVersion": { "const": "1.4.0" },
     "analysisId": { "type": "string", "minLength": 1 },
     "createdAt": { "type": "string", "format": "date-time" },
     "contractId": { "type": "string", "minLength": 1 },
@@ -49,6 +52,22 @@
       "type": "array",
       "items": { "$ref": "#/$defs/finding" }
     },
+    "crossClauseIssues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "clauseIds", "explanation", "severity"],
+        "properties": {
+          "kind": { "$ref": "#/$defs/crossClauseIssueKind" },
+          "clauseIds": { "type": "array", "minItems": 2, "items": { "type": "string", "minLength": 1 } },
+          "explanation": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["RED", "ORANGE", "OK"] }
+        }
+      }
+    },
+    "clauseLinking": { "type": "boolean" },
+    "financialTerms": { "$ref": "#/$defs/financialTerms" },
     "protectionReport": {
       "type": "array",
       "items": { "$ref": "#/$defs/protection" }
@@ -133,6 +152,8 @@
       ],
       "properties": {
         "clauseId": { "type": "string", "minLength": 1 },
+        "sectionLabel": { "type": "string", "minLength": 1 },
+        "heading": { "type": "string", "minLength": 1 },
         "severity": { "enum": ["RED", "ORANGE", "OK"] },
         "category": {
           "enum": ["legal_compliance", "contractual_risk", "tenant_preference", "informational"]
@@ -180,6 +201,41 @@
         "relatedFindingIds": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "contextClauses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["clauseId", "relation", "reason", "usedInAnalysis"],
+            "properties": {
+              "clauseId": { "type": "string", "minLength": 1 },
+              "relation": {
+                "enum": [
+                  "SAME_SECTION",
+                  "REFERENCES",
+                  "REFERENCED_BY",
+                  "OVERRIDES",
+                  "OVERRIDDEN_BY",
+                  "DEFINES_VALUE",
+                  "RELATED_TOPIC",
+                  "SIMILAR_TEXT"
+                ]
+              },
+              "reason": { "type": "string", "minLength": 1 },
+              "usedInAnalysis": { "type": "boolean" }
+            }
+          }
+        },
+        "crossClauseIssue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "clauseIds", "explanation"],
+          "properties": {
+            "kind": { "$ref": "#/$defs/crossClauseIssueKind" },
+            "clauseIds": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "explanation": { "type": "string", "minLength": 1 }
+          }
         },
         "locations": {
           "type": "array",
@@ -262,7 +318,145 @@
         "calculatedLimit": { "type": "number" },
         "difference": { "type": "number" },
         "unit": { "enum": ["ILS", "days"] },
-        "passesRule": { "type": "boolean" }
+        "passesRule": { "type": "boolean" },
+        "formula": { "type": "string", "minLength": 1 },
+        "sourceClauseIds": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "crossClauseIssueKind": { "enum": ["CONFLICT", "OVERRIDE", "COMBINED_EFFECT"] },
+    "termSource": {
+      "type": "object",
+      "required": ["clauseId", "quote", "verified", "origin"],
+      "properties": {
+        "clauseId": { "type": "string", "minLength": 1 },
+        "quote": { "type": "string" },
+        "verified": { "type": "boolean" },
+        "origin": { "enum": ["RULE", "MODEL"] },
+        "conflict": { "type": "boolean" }
+      }
+    },
+    "sourcedNumber": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/termSource" }],
+      "required": ["value"],
+      "properties": { "value": { "type": "number" } }
+    },
+    "financialTerms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "monthlyRent",
+        "leaseTermMonths",
+        "leaseStart",
+        "indexation",
+        "annualIncreasePercent",
+        "option",
+        "charges",
+        "oneTimeCosts",
+        "securities",
+        "lateVacating",
+        "latePayment",
+        "earlyExit",
+        "unknowns"
+      ],
+      "properties": {
+        "monthlyRent": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sourcedNumber" }] },
+        "leaseTermMonths": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sourcedNumber" }] },
+        "leaseStart": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }], "required": ["value"], "properties": { "value": { "type": "string", "format": "date" } } }
+          ]
+        },
+        "indexation": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }],
+              "required": ["index", "frequency", "floorAtBase"],
+              "properties": {
+                "index": { "enum": ["CPI", "USD", "OTHER"] },
+                "frequency": { "enum": ["MONTHLY", "ANNUAL", "AT_RENEWAL", "UNKNOWN"] },
+                "floorAtBase": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "annualIncreasePercent": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sourcedNumber" }] },
+        "option": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["months", "rent", "increasePercent"],
+          "properties": {
+            "months": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sourcedNumber" }] },
+            "rent": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sourcedNumber" }] },
+            "increasePercent": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/sourcedNumber" }] }
+          }
+        },
+        "charges": {
+          "type": "array",
+          "items": {
+            "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }],
+            "required": ["kind", "payer", "monthlyAmount"],
+            "properties": {
+              "kind": { "enum": ["ARNONA", "WATER", "ELECTRICITY", "GAS", "VAAD_BAYIT", "BUILDING_INSURANCE", "SPECIAL_BUILDING_EXPENSES", "CONTENTS_INSURANCE", "OTHER"] },
+              "payer": { "enum": ["TENANT", "LANDLORD"] },
+              "monthlyAmount": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "oneTimeCosts": {
+          "type": "array",
+          "items": {
+            "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }],
+            "required": ["kind", "amount", "timing"],
+            "properties": {
+              "kind": { "enum": ["BROKER_FEE", "LEGAL_FEE", "CLEANING", "OTHER"] },
+              "amount": { "type": ["number", "null"] },
+              "timing": { "enum": ["START", "END"] }
+            }
+          }
+        },
+        "securities": {
+          "type": "array",
+          "items": {
+            "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }],
+            "required": ["kind", "amount", "returnDays"],
+            "properties": {
+              "kind": { "enum": ["BANK_GUARANTEE", "CASH_DEPOSIT", "PROMISSORY_NOTE", "GUARANTOR", "OTHER"] },
+              "amount": { "type": ["number", "null"] },
+              "returnDays": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "lateVacating": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }], "required": ["perDay", "dailyRentMultiple"], "properties": { "perDay": { "type": ["number", "null"] }, "dailyRentMultiple": { "type": ["number", "null"] } } }
+          ]
+        },
+        "latePayment": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }], "required": ["perDay", "monthlyInterestPercent"], "properties": { "perDay": { "type": ["number", "null"] }, "monthlyInterestPercent": { "type": ["number", "null"] } } }
+          ]
+        },
+        "earlyExit": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object", "allOf": [{ "$ref": "#/$defs/termSource" }],
+              "required": ["kind", "months", "amount", "noticeDays"],
+              "properties": {
+                "kind": { "enum": ["UNTIL_REPLACEMENT", "UNTIL_END", "FIXED_MONTHS", "FIXED_AMOUNT", "ALLOWED_WITH_NOTICE", "NOT_ALLOWED"] },
+                "months": { "type": ["number", "null"] },
+                "amount": { "type": ["number", "null"] },
+                "noticeDays": { "type": ["number", "null"] }
+              }
+            }
+          ]
+        },
+        "unknowns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "preferences": {

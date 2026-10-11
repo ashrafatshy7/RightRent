@@ -22,6 +22,7 @@ const child = spawn(process.execPath, ["--import", "tsx", "--test", ...files], {
     DATA_DRIVER: "memory",
     MONGODB_URI: "",
     ANALYSIS_PROVIDER: "deterministic",
+    CPI_LOOKUP: "off",
     PII_NER_MODE: "regex",
     OPENAI_API_KEY: "",
     ANTHROPIC_API_KEY: "",

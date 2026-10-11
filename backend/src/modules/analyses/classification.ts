@@ -32,7 +32,9 @@ export function isSubstantiveClause(clause: ContractClause): boolean {
   const text = clause.text.trim();
   if (!text) return false;
   if (PAGE_MARKER.test(text) || NUMBER_OR_DATE_ONLY.test(text) || SEPARATOR_ONLY.test(text)) return false;
-  if (DOCUMENT_TITLE_ONLY.test(text) && text.split(/\s+/u).length <= 12) return false;
+  // A long title wraps onto a second line; it is still only the title.
+  const singleLine = text.replace(/\s+/gu, " ");
+  if (DOCUMENT_TITLE_ONLY.test(singleLine) && singleLine.split(" ").length <= 12) return false;
   return true;
 }
 
@@ -40,13 +42,25 @@ function normalizeForQuoteMatch(text: string) {
   return text.replace(/\s+/gu, " ").trim();
 }
 
-// Some PDF extractors (notably ones that place Hebrew glyphs one at a time instead of as normal
-// text runs) inject a stray single space between every character of the extracted clause text.
-// Collapsing runs of whitespace to one space (normalizeForQuoteMatch) does nothing for that case -
-// every gap is already exactly one space - so the verbatim check needs to ignore whitespace
-// entirely to recognize a genuinely-verbatim candidate against such a clause.
-function stripWhitespace(text: string) {
-  return text.replace(/\s+/gu, "");
+// The verbatim check ignores whitespace entirely, because the same contract text can reach us with
+// different spacing: a quote captured when the extractor still put a space between every glyph of a
+// per-glyph PDF ("ח ו ז ה"), or a model that re-spaced a quote it otherwise copied exactly.
+// Returns the matching span of the clause itself, so the tenant always sees the contract's own
+// spacing rather than the candidate's.
+export function findVerbatimSpan(clauseText: string, candidate: string): string | null {
+  const compactCandidate = candidate.replace(/\s+/gu, "");
+  if (!compactCandidate) return null;
+  const positions: number[] = [];
+  let compactClause = "";
+  for (let index = 0; index < clauseText.length; index += 1) {
+    const character = clauseText[index]!;
+    if (/\s/u.test(character)) continue;
+    positions.push(index);
+    compactClause += character;
+  }
+  const start = compactClause.indexOf(compactCandidate);
+  if (start < 0) return null;
+  return clauseText.slice(positions[start]!, positions[start + compactCandidate.length - 1]! + 1);
 }
 
 // clauseQuote is supposed to be the exact contract text, but it comes from a language model, so it
@@ -55,9 +69,8 @@ function stripWhitespace(text: string) {
 // never to an unverifiable, possibly-paraphrased quote (section 5 and section 23 of the brief).
 export function resolveClauseQuote(clause: ContractClause, candidate: string): string {
   const normalizedClause = normalizeForQuoteMatch(clause.text);
-  const normalizedCandidate = normalizeForQuoteMatch(candidate);
-  const compactCandidate = stripWhitespace(candidate);
-  if (compactCandidate && stripWhitespace(clause.text).includes(compactCandidate)) return normalizedCandidate;
+  const span = findVerbatimSpan(normalizedClause, candidate);
+  if (span) return span;
   if (normalizedClause.length <= 280) return normalizedClause;
   return `${normalizedClause.slice(0, 277)}...`;
 }
