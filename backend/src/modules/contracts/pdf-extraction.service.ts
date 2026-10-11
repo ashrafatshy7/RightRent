@@ -10,14 +10,6 @@ export type LocatedLine = {
   locations: ClauseLocation[];
 };
 
-export type PdfTextItem = {
-  str: string;
-  transform: number[];
-  width: number;
-  height: number;
-  hasEOL: boolean;
-};
-
 type OcrBlock = {
   paragraphs: Array<{
     lines: Array<{
@@ -105,17 +97,27 @@ function headingText(rest: string) {
   return text;
 }
 
+// A line that opens a numbered section: "סעיף 9 ...", "9. ...", "9) ...", "9.2 ...". The number is at
+// most three digits and must be followed by text, so a wrapped line that merely starts with a year or
+// an amount ("2028.", "30 ימים מראש") does not start a new clause.
+const NUMBERED_HEADING = /^\s*(?:סעיף\s+(\d{1,3}(?:\.\d{1,3})*)[.)\-:\s]+|(\d{1,3}(?:\.\d{1,3})+)[.)\-:]?\s+|(\d{1,3})\s*[.)\-:]\s*)(?=\S)/u;
+
+function numberedHeading(text: string) {
+  const match = NUMBERED_HEADING.exec(text);
+  const label = match?.[1] ?? match?.[2] ?? match?.[3];
+  return match && label ? { label, rest: text.slice(match[0].length) } : null;
+}
+
 function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
   if (!lines.length) return [];
 
   const explicitMarker = /^\s*\[(C\d{3})\]\s*$/;
-  const numberedHeading = /^\s*(?:סעיף\s+)?(\d+(?:\.\d+)*)[.)\-:\s]+/;
   const groups: ClauseGroup[] = [];
   let current: ClauseGroup | undefined;
 
   for (const line of lines) {
     const marker = explicitMarker.exec(line.text);
-    const heading = numberedHeading.exec(line.text);
+    const heading = numberedHeading(line.text);
     if (marker?.[1]) {
       current = { id: marker[1], lines: [] };
       groups.push(current);
@@ -129,9 +131,9 @@ function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
       current = { id: `C${String(groups.length + 1).padStart(3, "0")}`, lines: [] };
       groups.push(current);
     }
-    if (heading?.[1] && !current.lines.length) {
-      current.sectionLabel = heading[1];
-      const title = headingText(line.text.slice(heading[0].length));
+    if (heading && !current.lines.length) {
+      current.sectionLabel = heading.label;
+      const title = headingText(heading.rest);
       if (title) current.heading = title;
     }
     current.lines.push(line);
@@ -147,6 +149,7 @@ function clausesFromLines(lines: LocatedLine[]): ContractClause[] {
 // when their baselines are more than half the font size apart.
 const SAME_WORD_GAP_EM = 0.15;
 const NEW_LINE_BASELINE_EM = 0.5;
+const NEIGHBOUR_MAX_GAP_EM = 4;
 
 function unionBox(
   [leftX, leftY, leftWidth, leftHeight]: ClauseLocation["bbox"],
@@ -162,54 +165,143 @@ function unionBox(
   ];
 }
 
-// Some PDF producers place every Hebrew glyph as its own text item. Joining items with a space then
-// turns "חוזה" into "ח ו ז ה", and every text rule downstream (deterministic legal checks, the
-// protection checklist, quote matching) silently stops matching. Whether an item continues the
-// previous word is therefore decided from geometry, not from item boundaries. The distance is taken
-// in whichever direction the boxes are apart, since Hebrew advances right to left and numbers left
-// to right, often on the same line.
-export function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
-  const lines: LocatedLine[] = [];
-  let words: string[] = [];
-  let locations: ClauseLocation[] = [];
-  let previous: { left: number; right: number; y: number; size: number } | null = null;
+export type PdfTextItem = {
+  str: string;
+  transform: number[];
+  width: number;
+  height: number;
+  hasEOL: boolean;
+};
 
-  function flush() {
-    const text = words.join(" ").replace(/\s+/gu, " ").trim();
-    if (text) lines.push({ text, locations });
-    words = [];
-    locations = [];
-    previous = null;
-  }
+type PlacedItem = { str: string; left: number; right: number; y: number; size: number };
 
+const HEBREW_LETTER = /[\u05D0-\u05EA]/u;
+
+function placed(item: PdfTextItem): PlacedItem {
+  const left = item.transform[4] ?? 0;
+  return {
+    str: item.str,
+    left,
+    right: left + Math.max(item.width, 1),
+    y: item.transform[5] ?? 0,
+    size: Math.max(Math.abs(item.transform[3] ?? 0), item.height, 1),
+  };
+}
+
+function gapBetween(left: PlacedItem, right: PlacedItem) {
+  return Math.max(right.left - left.right, left.left - right.right);
+}
+
+function sameWord(left: PlacedItem, right: PlacedItem) {
+  return gapBetween(left, right) < SAME_WORD_GAP_EM * Math.max(left.size, right.size);
+}
+
+function boxOf(items: PlacedItem[]): ClauseLocation["bbox"] {
+  return items
+    .map((item): ClauseLocation["bbox"] => [item.left, item.y, item.right - item.left, item.size])
+    .reduce(unionBox);
+}
+
+// Lines in content order (as the producer wrote them): a new line starts at an explicit end-of-line
+// marker or when the baseline moves by more than half the font size.
+function contentLines(items: PdfTextItem[]): PlacedItem[][] {
+  const lines: PlacedItem[][] = [];
+  let current: PlacedItem[] = [];
   for (const item of items) {
-    if (!item.str.trim()) {
-      if (item.hasEOL) flush();
-      continue;
+    if (item.str.trim()) {
+      const next = placed(item);
+      const last = current[current.length - 1];
+      if (last && Math.abs(next.y - last.y) > NEW_LINE_BASELINE_EM * Math.max(next.size, last.size)) {
+        lines.push(current);
+        current = [];
+      }
+      current.push(next);
     }
-    const size = Math.max(Math.abs(item.transform[3] ?? 0), item.height, 1);
-    const x = item.transform[4] ?? 0;
-    const y = item.transform[5] ?? 0;
-    const width = Math.max(item.width, 1);
-    const box: ClauseLocation["bbox"] = [x, y, width, size];
-
-    if (previous && Math.abs(y - previous.y) > NEW_LINE_BASELINE_EM * Math.max(size, previous.size)) flush();
-    const gap = previous
-      ? Math.max(x - previous.right, previous.left - (x + width))
-      : Number.POSITIVE_INFINITY;
-    if (previous && gap < SAME_WORD_GAP_EM * Math.max(size, previous.size)) {
-      words[words.length - 1] += item.str;
-      const last = locations[locations.length - 1]!;
-      last.bbox = unionBox(last.bbox, box);
-    } else {
-      words.push(item.str);
-      locations.push({ page, bbox: box });
+    if (item.hasEOL && current.length) {
+      lines.push(current);
+      current = [];
     }
-    previous = { left: x, right: x + width, y, size };
-    if (item.hasEOL) flush();
   }
-  flush();
+  if (current.length) lines.push(current);
   return lines;
+}
+
+// The producer's order, joining items that touch into one word.
+function contentOrderWords(line: PlacedItem[]) {
+  const words: PlacedItem[][] = [];
+  for (const item of line) {
+    const word = words[words.length - 1];
+    if (word && sameWord(word[word.length - 1]!, item)) word.push(item);
+    else words.push([item]);
+  }
+  return words.map((word) => ({ text: word.map((item) => item.str).join(""), box: boxOf(word) }));
+}
+
+// For a producer that writes visual order, a line with Hebrew is rebuilt from where its items sit:
+// items that touch form a word, a word with Hebrew reads right to left and a number or Latin word left
+// to right, and the words of the line then read right to left.
+function rightToLeftWords(line: PlacedItem[]) {
+  const visual = [...line].sort((left, right) => left.left - right.left);
+  const words: PlacedItem[][] = [];
+  for (const item of visual) {
+    const word = words[words.length - 1];
+    if (word && sameWord(word[word.length - 1]!, item)) word.push(item);
+    else words.push([item]);
+  }
+  return words
+    .map((word) => {
+      const hebrew = word.some((item) => HEBREW_LETTER.test(item.str));
+      const ordered = hebrew ? [...word].reverse() : word;
+      let text = ordered.map((item) => item.str).join("");
+      // In a right-to-left line, punctuation after a number is drawn to its left, so a number run
+      // arrives as ".2028" or ",7"; it belongs after the number.
+      if (!hebrew) text = text.replace(/^([.,:;!?]+)(.+)$/u, "$2$1");
+      return { text, box: boxOf(word), right: Math.max(...word.map((item) => item.right)) };
+    })
+    .sort((left, right) => right.right - left.right);
+}
+
+// Whether two consecutive items belong to the same word is decided from geometry, not from item
+// boundaries: some PDF producers place every Hebrew glyph as its own text item, and joining items
+// with a space then turned "חוזה" into "ח ו ז ה", which silently defeated every text rule downstream
+// (deterministic legal checks, the protection checklist, quote matching).
+//
+// Producers also disagree on the order they write a Hebrew line in. Most write logical order (the
+// first word read comes first), but some - Chrome's "print to PDF" among them - write visual order,
+// left to right, so "1. מטרת השכירות" arrives as ". מטרת השכירות" followed by "1", and every clause
+// number lands at the end of its line. Which one a page uses shows in how consecutive Hebrew items
+// advance: leftwards in logical order, rightwards in visual order. The page is read accordingly;
+// geometry alone cannot tell a right-to-left paragraph from a left-to-right one (a centered
+// "עמוד 1" footer), so logical-order pages keep the producer's order.
+function writesVisualOrder(lines: PlacedItem[][]) {
+  let visual = 0;
+  let logical = 0;
+  for (const line of lines) {
+    const hebrew = line.filter((item) => HEBREW_LETTER.test(item.str));
+    for (let index = 1; index < hebrew.length; index += 1) {
+      const previous = hebrew[index - 1]!;
+      const next = hebrew[index]!;
+      // Only neighbours within a few words of each other vote; table cells far apart on one baseline
+      // say nothing about the order of running text.
+      if (gapBetween(previous, next) > NEIGHBOUR_MAX_GAP_EM * Math.max(previous.size, next.size)) continue;
+      if (next.left >= previous.right - 1) visual += 1;
+      else if (next.right <= previous.left + 1) logical += 1;
+    }
+  }
+  return visual >= 2 && visual > logical;
+}
+
+export function pageLines(items: PdfTextItem[], page: number): LocatedLine[] {
+  const lines = contentLines(items);
+  const visual = writesVisualOrder(lines);
+  return lines.flatMap((line) => {
+    // A line with no Hebrew on a visual-order page is usually the end of a Hebrew sentence that
+    // wrapped (".2028"); it is read the same way unless it is a run of several Latin words.
+    const rightToLeft = visual && (line.some((item) => HEBREW_LETTER.test(item.str)) || contentOrderWords(line).length === 1);
+    const words = rightToLeft ? rightToLeftWords(line) : contentOrderWords(line);
+    const text = words.map((word) => word.text).join(" ").replace(/\s+/gu, " ").trim();
+    return text ? [{ text, locations: words.map((word) => ({ page, bbox: word.box })) }] : [];
+  });
 }
 
 export function locatedLinesFromOcrBlocks(

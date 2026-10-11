@@ -137,3 +137,62 @@ test("numbered clauses keep the contract's own section number and short heading"
   );
   assert.ok(!("heading" in clauses[2]!), "absent labels are omitted, not set to undefined");
 });
+
+function placedItem(str: string, x: number, width: number, y = 600, hasEOL = false): PdfTextItem {
+  return { str, transform: [11, 0, 0, 11, x, y], width, height: 11, hasEOL };
+}
+
+test("visual-order Hebrew pages (Chrome's print to PDF) are read right to left", () => {
+  // As Chrome writes it: items left to right, so the clause number arrives last on its line, and a
+  // wrapped sentence end arrives as ".2028".
+  const lines = pageLines([
+    placedItem("בדצמבר", 100.6, 36.6),
+    placedItem("31", 140.4, 12.8),
+    placedItem("ועד יום", 156.4, 30.5),
+    placedItem("2027", 190.1, 25.6),
+    placedItem("בינואר", 218.9, 28.3),
+    placedItem("1", 250.3, 6.4),
+    placedItem("חודשים, מיום", 259.9, 59.1),
+    placedItem("24", 322.2, 12.8),
+    placedItem(". תקופת השכירות: תקופת השכירות היא", 338.2, 177.3),
+    placedItem("2", 515.5, 6.4, 600, true),
+    placedItem(".2028", 493.1, 28.8, 582, true),
+  ], 1);
+  assert.deepEqual(lines.map((line) => line.text), [
+    "2. תקופת השכירות: תקופת השכירות היא 24 חודשים, מיום 1 בינואר 2027 ועד יום 31 בדצמבר",
+    "2028.",
+  ]);
+});
+
+test("logical-order pages keep the producer's order, including left-to-right lines", () => {
+  const lines = pageLines([
+    // Logical order: each Hebrew run is to the left of the one before it.
+    placedItem("המשכיר משכיר לשוכרת דירה ברחוב דיזנגוף", 123.8, 401.5),
+    placedItem("118", 102.3, 18.3),
+    placedItem(", דירה", 74.6, 27.9),
+    placedItem("7", 65.3, 6.1),
+    placedItem(",", 62.4, 3.0, 600, true),
+    placedItem("ועד יום", 300, 30, 580),
+    placedItem("31", 280, 12, 580),
+    placedItem("בדצמבר", 230, 36, 580, true),
+    // A centered left-to-right footer.
+    placedItem("עמוד", 280, 25, 40),
+    placedItem("1", 309, 6, 40, true),
+  ], 1);
+  assert.deepEqual(lines.map((line) => line.text), [
+    "המשכיר משכיר לשוכרת דירה ברחוב דיזנגוף 118, דירה 7,",
+    "ועד יום 31 בדצמבר",
+    "עמוד 1",
+  ]);
+});
+
+test("a wrapped line that starts with a year or an amount does not open a new clause", () => {
+  const clauses = extractClausesFromPlainText([
+    "2. תקופת השכירות היא מיום 1 בינואר 2027 ועד יום 31 בדצמבר",
+    "2028. דמי השכירות ישולמו מראש.",
+    "30 ימים לפני תום התקופה תימסר הודעה.",
+    "3) בטוחות",
+    "השוכר ימסור ערבות.",
+  ].join("\n"));
+  assert.deepEqual(clauses.map(({ id, sectionLabel }) => [id, sectionLabel]), [["C001", "2"], ["C002", "3"]]);
+});
