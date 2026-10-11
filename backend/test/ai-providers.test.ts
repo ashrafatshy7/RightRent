@@ -174,3 +174,53 @@ test("a Claude answer cut off at the output token limit is reported as truncated
 
   await assert.rejects(analyzeWithClaude(clause, [lawSection], preferences), hasCode("AI_RESPONSE_TRUNCATED"));
 });
+
+test("related clauses are supplied as untrusted context and only supplied IDs survive in the verdict", async (context) => {
+  const requests: Array<Record<string, unknown>> = [];
+  const answers: unknown[] = [
+    // Cites a supplied clause and an invented one; the issue names only the invented one.
+    {
+      ...hebrewVerdict,
+      contextClauseIds: ["C002", "C999"],
+      crossClauseIssue: { kind: "CONFLICT", clauseIds: ["C999"], explanation: "סתירה בין הסעיפים" },
+    },
+    {
+      ...hebrewVerdict,
+      contextClauseIds: ["C002"],
+      crossClauseIssue: { kind: "OVERRIDE", clauseIds: ["C002", "C999"], explanation: "סעיף אחר גובר על הסעיף הזה" },
+    },
+  ];
+  mockFetch(context, async (init) => {
+    requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return claudeStream(answers.shift());
+  });
+  const related = [{
+    clauseId: "C002",
+    relation: "DEFINES_VALUE" as const,
+    reason: "מגדיר את דמי השכירות החודשיים: 6,000 ש״ח",
+    excerpt: "דמי השכירות החודשיים הם 6,000 ש״ח.",
+  }];
+
+  const unsupported = await analyzeWithClaude(clause, [lawSection], preferences, [], related);
+  assert.deepEqual(unsupported.contextClauseIds, ["C002"]);
+  assert.equal(unsupported.crossClauseIssue, undefined);
+
+  const supported = await analyzeWithClaude(clause, [lawSection], preferences, [], related);
+  assert.deepEqual(supported.crossClauseIssue, {
+    kind: "OVERRIDE",
+    clauseIds: ["C002"],
+    explanation: "סעיף אחר גובר על הסעיף הזה",
+  });
+
+  const content = String((requests[0]!.messages as Array<{ content: string }>)[0]!.content);
+  assert.match(content, /RELATED_CONTRACT_CLAUSES=\[\{"id":"C002","relation":"DEFINES_VALUE"/u);
+  assert.match(content, /<UNTRUSTED_RELATED_CLAUSE id="C002">דמי השכירות החודשיים הם 6,000 ש״ח\.<\/UNTRUSTED_RELATED_CLAUSE>/u);
+  assert.match(String(requests[0]!.system), /Judge only the focal clause/u);
+  const schema = (requests[0]!.output_config as { format: { schema: { required: string[] } } }).format.schema;
+  assert.ok(schema.required.includes("contextClauseIds"));
+
+  // Without related clauses the request is unchanged from a single-clause analysis.
+  answers.push(hebrewVerdict);
+  await analyzeWithClaude(clause, [lawSection], preferences);
+  assert.doesNotMatch(String((requests[2]!.messages as Array<{ content: string }>)[0]!.content), /RELATED_CONTRACT_CLAUSES/u);
+});

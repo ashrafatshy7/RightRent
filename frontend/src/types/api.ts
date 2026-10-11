@@ -62,7 +62,24 @@ export type DeterministicCheck = {
   difference: number;
   unit: "ILS" | "days";
   passesRule: boolean;
+  formula?: string;
+  sourceClauseIds?: string[];
 };
+
+export type ClauseRelation =
+  | "SAME_SECTION"
+  | "REFERENCES"
+  | "REFERENCED_BY"
+  | "OVERRIDES"
+  | "OVERRIDDEN_BY"
+  | "DEFINES_VALUE"
+  | "RELATED_TOPIC"
+  | "SIMILAR_TEXT";
+
+export type ContextClause = { clauseId: string; relation: ClauseRelation; reason: string; usedInAnalysis: boolean };
+
+export type CrossClauseIssueKind = "CONFLICT" | "OVERRIDE" | "COMBINED_EFFECT";
+export type CrossClauseIssue = { kind: CrossClauseIssueKind; clauseIds: string[]; explanation: string };
 
 export type LegalReference = {
   lawReferenceId: string;
@@ -99,6 +116,8 @@ export type Finding = {
   legalReferences: LegalReference[];
   deterministicChecks?: DeterministicCheck[];
   relatedFindingIds: string[];
+  contextClauses?: ContextClause[];
+  crossClauseIssue?: CrossClauseIssue;
   locations: ClauseLocation[];
 };
 
@@ -122,6 +141,9 @@ export type Analysis = {
   headline: string;
   keyFindingIds: string[];
   findings: Finding[];
+  // Absent on analyses saved before clauses were linked.
+  crossClauseIssues?: Array<CrossClauseIssue & { severity: Severity }>;
+  clauseLinking?: boolean;
   protectionReport: Protection[];
   missingProtections: Protection[];
   suggestedAdditions: Protection[];

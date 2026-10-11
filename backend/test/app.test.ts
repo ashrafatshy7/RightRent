@@ -254,6 +254,13 @@ test("analysis returns deterministic legal findings and a marked PDF", async () 
   assert.equal(validateAnalysis(body.analysis), true, JSON.stringify(validateAnalysis.errors));
   assert.equal(body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002").severity, "RED");
   assert.equal(body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002").legalReferences[0].lawReferenceId, "IL-RLL-25Y-SECURITY-CAP");
+  // The guarantee was judged together with the clause that defines the rent and term it is capped by.
+  const guarantee = body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002");
+  assert.equal(body.analysis.clauseLinking, true);
+  assert.deepEqual(guarantee.deterministicChecks[0].sourceClauseIds, ["C001"]);
+  const rentLink = guarantee.contextClauses.find((link: { clauseId: string }) => link.clauseId === "C001");
+  assert.equal(rentLink.relation, "DEFINES_VALUE");
+  assert.equal(rentLink.usedInAnalysis, true);
   analysisId = body.analysis.analysisId;
 
   const marked = await fetch(`${baseUrl}/api/analyses/${analysisId}/marked-pdf`, authenticated());

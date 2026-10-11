@@ -1,5 +1,7 @@
 import type { ConfidenceLevel, ContractClause, DeterministicCheck, FindingTopic, TenantPreferences } from "../../domain/models.js";
 import type { ProviderVerdict } from "./ai-providers.js";
+import type { ClauseFact, ClauseProfile, ContractFacts } from "./clause-facts.service.js";
+import type { ClauseLink } from "./clause-linking.service.js";
 
 // Authoritative citation for each rule id a deterministic check can produce. Used both to attach a
 // legal reference to a forced-RED finding (see toFinding in analysis.service.ts, which does not rely
@@ -18,37 +20,7 @@ export const DETERMINISTIC_RULE_LAW_INFO: Record<string, { lawName: string; sect
   },
 };
 
-function amountNear(text: string, phrase: RegExp) {
-  const match = phrase.exec(text);
-  if (!match) return null;
-  const amount = /(?:בסך|הם|של|is|of)?\s*(?:ILS\s*)?([\d,.]+)\s*(?:ש["״']?ח|₪|ILS)?/iu.exec(match[0])?.[1];
-  return amount ? Number(amount.replace(/[,.]/g, "")) : null;
-}
-
-function leaseMonths(text: string, fallback: number) {
-  const numeric = /(?:תקופת\s+השכירות|לתקופה|lease\s+term)[^\n.]{0,80}?(\d{1,3})\s*(?:חודש|months?)/iu.exec(text)?.[1];
-  if (numeric) return Number(numeric);
-  if (/שנים\s+עשר\s+חודש/iu.test(text)) return 12;
-  if (/שנה\s+(?:אחת|שלמה)/u.test(text)) return 12;
-  return fallback;
-}
-
-function daysInClause(text: string) {
-  const numeric = /(\d+)\s*(?:ימים|יום)/u.exec(text)?.[1];
-  if (numeric) return Number(numeric);
-  if (/שלושה\s+ימים/u.test(text)) return 3;
-  if (/שבעה\s+ימים|שבוע/u.test(text)) return 7;
-  return null;
-}
-
-function securityReturnDays(text: string) {
-  // The `{0,N}?` gaps are lazy, matching as few characters as possible: with a greedy `{0,N}`,
-  // `[^.\n]` also matches digits, so it would swallow the leading digits of a multi-digit number
-  // before backtracking, and (\d+) would only capture the number's last digit or two.
-  const numeric = /(?:פיקדון|ערבות|ערובה)[^.\n]{0,60}?(?:יוחזר(?:ו)?|תוחזר|יושב(?:ו)?)[^.\n]{0,40}?(\d+)\s*(?:ימים|יום)/u
-    .exec(text)?.[1];
-  return numeric ? Number(numeric) : null;
-}
+const URGENT_REPAIR_LIMIT_DAYS = 3;
 
 const MENTIONS_GUARANTEE_REALIZATION = /(?:לממש|מימוש|לחלט|חילוט)[^.\n]{0,50}(?:ערבות|ערובה|פיקדון)/u;
 const MENTIONS_NO_NOTICE = /ללא[^.\n]{0,15}(?:הודעה|התראה)/u;
@@ -57,63 +29,90 @@ const MENTIONS_NO_COORDINATION = /ללא[^.\n]{0,15}(?:תיאום|הודעה)/u;
 const MENTIONS_OWNER_SIDE_CHARGES = /(?:ביטוח\s+(?:ה)?מבנה|הוצאות\s+מיוחדות)[^.\n]{0,60}(?:השוכר)/u;
 const MENTIONS_NO_REIMBURSEMENT = /לא\s+(?:יהיה|תהיה)\s+זכאי[^.\n]{0,20}(?:החזר|פיצוי)/u;
 const MENTIONS_SELF_REPAIR = /תיקון[^.\n]{0,30}(?:עצמאי|בעצמו|באופן\s+עצמאי)|(?:ביצע|שביצע)[^.\n]{0,20}(?:תיקון|תיקונים)/u;
+// Language that moves a cost or a risk onto the tenant, used to tell a "notwithstanding section X"
+// clause that takes a protection away from one that merely adjusts it.
+const SHIFTS_BURDEN_TO_TENANT = /השוכר(?:ת)?\s+(?:יישא|תישא|ישא|תשא|אחראי|אחראית|ישלם|תשלם)|על\s+חשבון\s+השוכר|לא\s+(?:יהיה|תהיה)\s+זכאי|מוותר/u;
 const SECURITY_RETURN_MAX_REASONABLE_DAYS = 60;
+// Reported from both clauses of the pair and merged into one issue, so it names neither as "this".
+const OVERRIDE_EXPLANATION = "סעיף אחד בחוזה חל \"על אף האמור\" בסעיף אחר ומעביר לשוכר נטל שהסעיף האחר הטיל על המשכיר, כך שההגנה שבסעיף האחר מתבטלת בפועל.";
+
+function shekels(value: number) {
+  return `${value.toLocaleString("he-IL", { maximumFractionDigits: 2 })} ש״ח`;
+}
+
+function round(value: number) {
+  return Math.round(value * 100) / 100;
+}
 
 // Legally defined numeric limits, computed in code rather than left for a language model to work
 // out (section 12 of the brief). Shared by both analysis providers: the offline fallback below
 // bakes these straight into its verdict, and the Claude-backed pipeline (analysis.service.ts) both
 // feeds these to the model as ground truth and forces a RED verdict when one fails, regardless of
-// what the model concludes.
-export function computeDeterministicChecks(
-  clause: ContractClause,
-  fullText: string,
-  preferences: TenantPreferences,
-): DeterministicCheck[] {
+// what the model concludes. The rent and the lease term come from the clauses that define them
+// (see deriveContractFacts), which are often sections away from the guarantee clause.
+export function computeDeterministicChecks(profile: ClauseProfile, contractFacts: ContractFacts): DeterministicCheck[] {
   const checks: DeterministicCheck[] = [];
+  const sources = (...facts: Array<ClauseFact | undefined>) => [...new Set(facts
+    .filter((fact): fact is ClauseFact => Boolean(fact) && fact!.clauseId !== profile.clauseId)
+    .map((fact) => fact.clauseId))];
 
-  const monthlyRent = amountNear(
-    fullText,
-    /(?:דמי\s+השכירות(?:\s+החודשיים)?|monthly\s+rent)[^\n.]{0,100}?(?:בסך|הם|של|is)?\s*(?:ILS\s*)?[\d,.]+\s*(?:ש["״']?ח|₪|ILS)?/iu,
-  );
-  const security = amountNear(
-    clause.text,
-    /(?:ערבות\s+בנקאית|פיקדון\s+כספי|ערובה|bank\s+guarantee|cash\s+deposit)[^\n.]{0,120}?(?:בסך|של|of)?\s*(?:ILS\s*)?[\d,.]+\s*(?:ש["״']?ח|₪|ILS)?/iu,
-  );
-  if (monthlyRent !== null && security !== null) {
-    const months = leaseMonths(fullText, preferences.leaseLengthMonths);
-    const cap = Math.min((monthlyRent * months) / 3, monthlyRent * 3);
-    checks.push({
-      ruleId: "IL-RLL-25Y-SECURITY-CAP",
-      label: "תקרת הערובה המותרת",
-      legalReferenceId: "IL-RLL-25Y-SECURITY-CAP",
-      contractValue: security,
-      legalLimit: cap,
-      calculatedLimit: cap,
-      difference: security - cap,
-      unit: "ILS",
-      passesRule: security <= cap,
-    });
-  }
-
-  if (/ליקוי\s+דחוף|תיקון\s+דחוף/u.test(clause.text)) {
-    const days = daysInClause(clause.text);
-    if (days !== null) {
+  const security = profile.facts.find((fact) => fact.kind === "SECURITY_AMOUNT");
+  const rent = contractFacts.MONTHLY_RENT;
+  const term = contractFacts.LEASE_TERM_MONTHS;
+  if (security && rent) {
+    const threeMonths = rent.value * 3;
+    // Without a stated lease term the exact cap cannot be computed, but it is never above three
+    // months' rent, so a guarantee above that is over the cap whatever the term. Anything lower is
+    // left undecided rather than measured against a guessed term.
+    const cap = term ? round(Math.min((rent.value * term.value) / 3, threeMonths)) : threeMonths;
+    if (term || security.value > threeMonths) {
       checks.push({
-        ruleId: "IL-RLL-25Z-REPAIRS",
-        label: "מועד מרבי לתיקון ליקוי דחוף",
-        legalReferenceId: "IL-RLL-25Z-REPAIRS",
-        contractValue: days,
-        legalLimit: 3,
-        calculatedLimit: 3,
-        difference: days - 3,
-        unit: "days",
-        passesRule: days <= 3,
+        ruleId: "IL-RLL-25Y-SECURITY-CAP",
+        label: "תקרת הערובה המותרת",
+        legalReferenceId: "IL-RLL-25Y-SECURITY-CAP",
+        contractValue: security.value,
+        legalLimit: cap,
+        calculatedLimit: cap,
+        difference: round(security.value - cap),
+        unit: "ILS",
+        passesRule: security.value <= cap,
+        formula: term
+          ? `הנמוך מבין ${shekels(rent.value)} × ${term.value} חודשים ÷ 3 לבין 3 × ${shekels(rent.value)} = ${shekels(cap)}`
+          : `3 × ${shekels(rent.value)} = ${shekels(cap)} (תקופת השכירות לא צוינה בחוזה, וזו התקרה הגבוהה ביותר האפשרית)`,
+        sourceClauseIds: sources(rent, term),
       });
     }
   }
 
+  const urgentRepair = profile.facts.find((fact) => fact.kind === "URGENT_REPAIR_DAYS");
+  if (urgentRepair) {
+    checks.push({
+      ruleId: "IL-RLL-25Z-REPAIRS",
+      label: "מועד מרבי לתיקון ליקוי דחוף",
+      legalReferenceId: "IL-RLL-25Z-REPAIRS",
+      contractValue: urgentRepair.value,
+      legalLimit: URGENT_REPAIR_LIMIT_DAYS,
+      calculatedLimit: URGENT_REPAIR_LIMIT_DAYS,
+      difference: round(urgentRepair.value - URGENT_REPAIR_LIMIT_DAYS),
+      unit: "days",
+      passesRule: urgentRepair.value <= URGENT_REPAIR_LIMIT_DAYS,
+      formula: `ליקוי דחוף יתוקן בתוך ${URGENT_REPAIR_LIMIT_DAYS} ימים לכל היותר`,
+      sourceClauseIds: [],
+    });
+  }
+
   return checks;
 }
+
+// Everything the offline heuristic needs about a clause beyond its own text: the tenant's
+// preferences, what the clause and the contract define, the clauses linked to it, and the checks.
+export type HeuristicContext = {
+  preferences: TenantPreferences;
+  profile: ClauseProfile;
+  contractFacts: ContractFacts;
+  links: ClauseLink[];
+  checks: DeterministicCheck[];
+};
 
 type HeuristicVerdictFields = {
   title: string;
@@ -140,16 +139,13 @@ const NO_ISSUE_FOUND: HeuristicVerdictFields = {
 // its two numeric legal-limit rules, then applies a chain of text-pattern heuristics for everything
 // else. Only the last matching heuristic's copy is shown when several match the same clause -
 // acceptable here because this provider exists for testability, not as the production analyzer.
-export function deterministicVerdict(
-  clause: ContractClause,
-  fullText: string,
-  preferences: TenantPreferences,
-): ProviderVerdict {
+export function deterministicVerdict(clause: ContractClause, context: HeuristicContext): ProviderVerdict {
+  const { preferences, profile, contractFacts, links, checks } = context;
   const assessment = { violatesLaw: false, riskWarning: false, preferenceConflict: false };
   const legalReferenceIds: string[] = [];
   let fields: HeuristicVerdictFields = NO_ISSUE_FOUND;
 
-  const checks = computeDeterministicChecks(clause, fullText, preferences);
+  let crossClauseIssue: ProviderVerdict["crossClauseIssue"];
   const failedCheck = checks.find((check) => !check.passesRule);
   if (failedCheck) {
     assessment.violatesLaw = true;
@@ -177,10 +173,7 @@ export function deterministicVerdict(
       };
   }
 
-  const monthlyRent = amountNear(
-    fullText,
-    /(?:דמי\s+השכירות(?:\s+החודשיים)?|monthly\s+rent)[^\n.]{0,100}?(?:בסך|הם|של|is)?\s*(?:ILS\s*)?[\d,.]+\s*(?:ש["״']?ח|₪|ILS)?/iu,
-  );
+  const monthlyRent = contractFacts.MONTHLY_RENT;
 
   if (!assessment.violatesLaw && preferences.petsRequired && /(?:(?:אין|אסור)[^\n.]{0,50}(?:בעל\s+חיים|כלב|חתול)|(?:pets?|animals?)\s+(?:are\s+)?(?:not\s+allowed|prohibited))/iu.test(clause.text)) {
     assessment.preferenceConflict = true;
@@ -195,7 +188,7 @@ export function deterministicVerdict(
     };
   }
 
-  if (!assessment.violatesLaw && monthlyRent !== null && monthlyRent > preferences.maxMonthlyRentIls && /דמי\s+השכירות|monthly\s+rent/iu.test(clause.text)) {
+  if (!assessment.violatesLaw && monthlyRent?.clauseId === clause.id && monthlyRent.value > preferences.maxMonthlyRentIls) {
     assessment.preferenceConflict = true;
     fields = {
       title: "דמי השכירות חורגים מהתקציב",
@@ -234,8 +227,8 @@ export function deterministicVerdict(
     };
   }
 
-  const increase = /(?:העלאת|עליית|הגדלת)\s+דמי\s+השכירות[^\n.]{0,80}?(\d+(?:\.\d+)?)\s*%/u.exec(clause.text)?.[1];
-  if (!assessment.violatesLaw && increase && Number(increase) > preferences.maxAnnualRentIncreasePercent) {
+  const increase = profile.facts.find((fact) => fact.kind === "RENT_INCREASE_PERCENT")?.value;
+  if (!assessment.violatesLaw && increase !== undefined && increase > preferences.maxAnnualRentIncreasePercent) {
     assessment.preferenceConflict = true;
     fields = {
       title: "שיעור העלאת השכירות גבוה מההעדפה",
@@ -303,8 +296,8 @@ export function deterministicVerdict(
     };
   }
 
-  const returnDays = securityReturnDays(clause.text);
-  if (!assessment.violatesLaw && returnDays !== null && returnDays > SECURITY_RETURN_MAX_REASONABLE_DAYS) {
+  const returnDays = profile.facts.find((fact) => fact.kind === "SECURITY_RETURN_DAYS")?.value;
+  if (!assessment.violatesLaw && returnDays !== undefined && returnDays > SECURITY_RETURN_MAX_REASONABLE_DAYS) {
     assessment.riskWarning = true;
     fields = {
       title: "ייקח זמן רב מדי עד שתקבלו בחזרה את הפיקדון או הערבות",
@@ -332,5 +325,53 @@ export function deterministicVerdict(
     };
   }
 
-  return { ...fields, clauseQuote: clause.text, legalAssessment: assessment, legalReferenceIds };
+  // A "notwithstanding section X" clause that moves a burden onto the tenant takes away what section
+  // X gave; both clauses are flagged, and the pair is reported once as an override.
+  const overrides = links.filter((link) => link.relation === "OVERRIDES");
+  const overriddenBy = links.filter((link) => link.relation === "OVERRIDDEN_BY" && SHIFTS_BURDEN_TO_TENANT.test(link.excerpt));
+  if (!assessment.violatesLaw && overrides.length && SHIFTS_BURDEN_TO_TENANT.test(clause.text)) {
+    assessment.riskWarning = true;
+    crossClauseIssue = {
+      kind: "OVERRIDE",
+      clauseIds: overrides.map((link) => link.clauseId),
+      explanation: OVERRIDE_EXPLANATION,
+    };
+    fields = {
+      title: "הסעיף הזה מבטל הגנה שניתנה לכם בסעיף אחר",
+      explanation: "הסעיף קובע שהוא חל על אף האמור בסעיף אחר בחוזה, ומטיל על השוכר נטל שהסעיף האחר הטיל על המשכיר.",
+      plainLanguageExplanation: "סעיף אחר בחוזה נותן לכם הגנה, והסעיף הזה מבטל אותה במפורש ומעביר את הנטל אליכם.",
+      whyItMatters: "קריאה של כל סעיף לבד עלולה להטעות: ההגנה נראית קיימת, אבל בפועל הסעיף הזה גובר עליה.",
+      recommendedAction: "בקשו למחוק את הסעיף הזה או לצמצם אותו כך שלא יגבר על ההגנה שבסעיף האחר.",
+      topic: "other",
+      confidence: "medium",
+    };
+  } else if (!assessment.violatesLaw && overriddenBy.length) {
+    assessment.riskWarning = true;
+    crossClauseIssue = {
+      kind: "OVERRIDE",
+      clauseIds: overriddenBy.map((link) => link.clauseId),
+      explanation: OVERRIDE_EXPLANATION,
+    };
+    fields = {
+      ...fields,
+      title: "ההגנה בסעיף הזה מבוטלת בסעיף אחר בחוזה",
+      plainLanguageExplanation: "הסעיף הזה נראה מגן עליכם, אבל סעיף אחר בחוזה קובע שהוא גובר עליו ומעביר אליכם את הנטל.",
+      whyItMatters: "בפועל ייתכן שלא תוכלו להסתמך על ההגנה שבסעיף הזה.",
+      recommendedAction: "בקשו למחוק את הסעיף שגובר על הסעיף הזה, כדי שההגנה תישאר בתוקף.",
+      confidence: "medium",
+    };
+  }
+
+  const contextClauseIds = [...new Set([
+    ...checks.flatMap((check) => check.sourceClauseIds ?? []),
+    ...(crossClauseIssue?.clauseIds ?? []),
+  ])];
+  return {
+    ...fields,
+    clauseQuote: clause.text,
+    legalAssessment: assessment,
+    legalReferenceIds,
+    contextClauseIds,
+    ...(crossClauseIssue ? { crossClauseIssue } : {}),
+  };
 }

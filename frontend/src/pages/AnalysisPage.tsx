@@ -6,6 +6,8 @@ import {
   Copy,
   Download,
   ExternalLink,
+  GitMerge,
+  Link2,
   FileCheck2,
   FileText,
   ScanSearch,
@@ -22,7 +24,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { api, messageForError } from "../lib/api-client";
 import { clauseLabel, formatCurrency, formatDate, formatDuration, formatNumber } from "../lib/format";
 import { useMediaQuery } from "../lib/use-media-query";
-import type { Analysis, DeterministicCheck, Finding, FindingCategory, Severity } from "../types/api";
+import type { Analysis, CrossClauseIssueKind, DeterministicCheck, Finding, FindingCategory, Severity } from "../types/api";
 import type { FocusRequest, ViewerHighlight } from "../components/ContractViewer";
 
 // pdf.js is large; it loads only when an analysis is actually opened.
@@ -54,6 +56,13 @@ const categoryMeta: Record<FindingCategory, string> = {
   contractual_risk: "סיכון חוזי",
   tenant_preference: "התאמה להעדפות שלך",
   informational: "מידע כללי",
+};
+
+// Problems that exist only in the combination of clauses, named for the tenant.
+const crossClauseKindLabel: Record<CrossClauseIssueKind, string> = {
+  CONFLICT: "סתירה בין סעיפים",
+  OVERRIDE: "סעיף שמבטל הגנה",
+  COMBINED_EFFECT: "השפעה משולבת",
 };
 
 function formatCheckValue(value: number, unit: DeterministicCheck["unit"]) {
@@ -114,10 +123,14 @@ export function AnalysisPage() {
       .map((finding) => finding.clauseId)),
     [analysis, filter],
   );
-  const linkedClauseIds = useMemo(
-    () => new Set(selectedClauseId ? findingsByClauseId.get(selectedClauseId)?.relatedFindingIds ?? [] : []),
-    [selectedClauseId, findingsByClauseId],
-  );
+  // The clauses read together with the selected one, and other findings on its topic, are outlined.
+  const linkedClauseIds = useMemo(() => {
+    const selected = selectedClauseId ? findingsByClauseId.get(selectedClauseId) : undefined;
+    return new Set([
+      ...(selected?.relatedFindingIds ?? []),
+      ...(selected?.contextClauses ?? []).map((link) => link.clauseId),
+    ]);
+  }, [selectedClauseId, findingsByClauseId]);
 
   // Every in-page link to a finding (the top summary, "related to", protections) is a #finding-ID
   // anchor, so following the hash keeps the document in step with all of them at once.
@@ -209,6 +222,26 @@ export function AnalysisPage() {
         </section>
       ) : null}
 
+      {analysis.crossClauseIssues?.length ? (
+        <section className="cross-clause-issues" aria-labelledby="cross-clause-title">
+          <div className="section-heading"><div><span className="eyebrow">מעבר לסעיף הבודד</span><h2 id="cross-clause-title">בעיות שנובעות משילוב של סעיפים</h2></div><GitMerge size={22} /></div>
+          <ul>
+            {analysis.crossClauseIssues.map((issue) => (
+              <li key={`${issue.kind}-${issue.clauseIds.join("-")}`} className={`cross-clause-issue severity-${issue.severity.toLowerCase()}`}>
+                <div className="cross-clause-kind"><StatusBadge tone={severityMeta[issue.severity].tone}>{crossClauseKindLabel[issue.kind]}</StatusBadge></div>
+                <p>{issue.explanation}</p>
+                <div className="clause-chips">
+                  {issue.clauseIds.map((clauseId) => {
+                    const finding = findingsByClauseId.get(clauseId);
+                    return <button key={clauseId} type="button" className="clause-chip" onClick={() => showInContract(clauseId)}>{finding ? clauseLabel(finding) : clauseId}</button>;
+                  })}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <div className="analysis-workspace">
         <section className="findings-section">
           <div className="section-heading">
@@ -225,6 +258,7 @@ export function AnalysisPage() {
               findingsByClauseId={findingsByClauseId}
               selected={finding.clauseId === selectedClauseId}
               onShowInContract={finding.locations?.length ? () => showInContract(finding.clauseId) : undefined}
+              onShowClause={showInContract}
             />
           ))}</div>
           {isNarrow ? <div className="protection-panel inline-protections">{protectionPanel}</div> : null}
@@ -300,7 +334,7 @@ function ScoreCard({ tone, value, label, icon: Icon }: { tone: string; value: nu
   return <article className={`score-card score-${tone}`}><span><Icon size={22} /></span><div><strong>{value}</strong><small>{label}</small></div></article>;
 }
 
-function FindingCard({ finding, findingsByClauseId, selected, onShowInContract }: { finding: Finding; findingsByClauseId: Map<string, Finding>; selected: boolean; onShowInContract: (() => void) | undefined }) {
+function FindingCard({ finding, findingsByClauseId, selected, onShowInContract, onShowClause }: { finding: Finding; findingsByClauseId: Map<string, Finding>; selected: boolean; onShowInContract: (() => void) | undefined; onShowClause: (clauseId: string) => void }) {
   const meta = severityMeta[finding.severity];
   const Icon = meta.icon;
   const [copied, setCopied] = useState(false);
@@ -310,6 +344,10 @@ function FindingCard({ finding, findingsByClauseId, selected, onShowInContract }
     .map((clauseId) => findingsByClauseId.get(clauseId))
     .filter((related): related is Finding => Boolean(related));
   const plainLanguageExplanation = finding.plainLanguageExplanation ?? finding.explanation;
+  const labelFor = (clauseId: string) => {
+    const clause = findingsByClauseId.get(clauseId);
+    return clause ? clauseLabel(clause) : clauseId;
+  };
 
   async function copySuggestedText() {
     if (!finding.suggestedReplacementText) return;
@@ -356,6 +394,27 @@ function FindingCard({ finding, findingsByClauseId, selected, onShowInContract }
           </div>
         ) : null}
 
+        {finding.crossClauseIssue ? (
+          <div className="finding-cross-clause">
+            <strong><GitMerge size={15} /> {crossClauseKindLabel[finding.crossClauseIssue.kind]} עם {finding.crossClauseIssue.clauseIds.map(labelFor).join(", ")}</strong>
+            <p>{finding.crossClauseIssue.explanation}</p>
+          </div>
+        ) : null}
+
+        {finding.contextClauses?.length ? (
+          <div className="finding-context">
+            <span><Link2 size={14} /> נבדק יחד עם</span>
+            <ul>
+              {finding.contextClauses.map((link) => (
+                <li key={link.clauseId} className={link.usedInAnalysis ? "used" : ""}>
+                  <button type="button" className="clause-chip" onClick={() => onShowClause(link.clauseId)} title={link.usedInAnalysis ? "שימש בניתוח הסעיף" : "סופק כהקשר"}>{labelFor(link.clauseId)}</button>
+                  <small>{link.reason}</small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {relatedFindings.length ? (
           <p className="finding-related">
             קשור גם ל: {relatedFindings.map((related, index) => (
@@ -384,6 +443,8 @@ function FindingCard({ finding, findingsByClauseId, selected, onShowInContract }
                 <li key={check.ruleId}>
                   {check.label}: {formatCheckValue(check.contractValue, check.unit)} לעומת התקרה {formatCheckValue(check.calculatedLimit, check.unit)}
                   {check.passesRule ? " (בתוך התקרה)" : " (מעל התקרה)"}
+                  {check.formula ? <span className="check-formula">איך חושב: {check.formula}</span> : null}
+                  {check.sourceClauseIds?.length ? <span className="check-formula">הנתונים נלקחו מ{check.sourceClauseIds.map(labelFor).join(" ומ")}</span> : null}
                 </li>
               ))}
             </ul>

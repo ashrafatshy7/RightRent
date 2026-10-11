@@ -47,6 +47,8 @@ const piiNerMode = choice(
   ["regex", "dictabert"] as const,
 );
 const adminEmails = csv(process.env.ADMIN_EMAILS).map((email) => email.toLowerCase());
+// Off only for evaluation runs that measure the analysis without cross-clause context.
+const clauseLinking = choice("CLAUSE_LINKING", process.env.CLAUSE_LINKING ?? "on", ["on", "off"] as const) === "on";
 const manageMongoVectorIndex = choice(
   "MONGODB_MANAGE_VECTOR_INDEX",
   process.env.MONGODB_MANAGE_VECTOR_INDEX ?? "true",
@@ -102,6 +104,7 @@ export const env = Object.freeze({
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   analysisProvider,
+  clauseLinking,
   piiNerMode,
   piiNerEndpoint: process.env.PII_NER_ENDPOINT ?? "http://127.0.0.1:8001",
   piiNerToken: process.env.PII_NER_TOKEN,

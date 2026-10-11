@@ -117,6 +117,41 @@ export type DeterministicCheck = {
   difference: number;
   unit: "ILS" | "days";
   passesRule: boolean;
+  // How the limit was computed, with the contract's own numbers ("min(6,000 × 12 ÷ 3, 3 × 6,000)"),
+  // and the clauses those numbers came from (the rent and lease term are often defined elsewhere).
+  formula?: string;
+  sourceClauseIds?: string[];
+};
+
+// Why another clause was read together with this one (see clause-linking.service.ts).
+export type ClauseRelation =
+  | "SAME_SECTION"
+  | "REFERENCES"
+  | "REFERENCED_BY"
+  | "OVERRIDES"
+  | "OVERRIDDEN_BY"
+  | "DEFINES_VALUE"
+  | "RELATED_TOPIC"
+  | "SIMILAR_TEXT";
+
+export type ContextClause = {
+  clauseId: string;
+  relation: ClauseRelation;
+  // A short Hebrew reason shown to the tenant ("מגדיר את דמי השכירות החודשיים").
+  reason: string;
+  // Whether the analysis actually relied on this clause (cited by the model, or the source of a
+  // deterministic fact), as opposed to merely having been supplied as context.
+  usedInAnalysis: boolean;
+};
+
+export type CrossClauseIssueKind = "CONFLICT" | "OVERRIDE" | "COMBINED_EFFECT";
+
+// A problem that exists only in the combination of clauses: two clauses that contradict each other,
+// one that cancels a protection given by another, or terms that are harmless alone but not together.
+export type CrossClauseIssue = {
+  kind: CrossClauseIssueKind;
+  clauseIds: string[];
+  explanation: string;
 };
 
 export type Finding = {
@@ -145,6 +180,10 @@ export type Finding = {
   deterministicChecks?: DeterministicCheck[];
   // Other finding IDs (clauseIds) that share this finding's topic, for "related issues" grouping.
   relatedFindingIds: string[];
+  // The other clauses this one was analyzed together with, and an issue that exists only in their
+  // combination.
+  contextClauses?: ContextClause[];
+  crossClauseIssue?: CrossClauseIssue;
   locations: ClauseLocation[];
 };
 
@@ -159,7 +198,7 @@ export type Protection = {
 };
 
 export type AnalysisResult = {
-  schemaVersion: "1.2.0";
+  schemaVersion: "1.3.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";
@@ -169,6 +208,11 @@ export type AnalysisResult = {
   headline: string;
   keyFindingIds: string[];
   findings: Finding[];
+  // Cross-clause issues reported on findings, merged so a conflict reported from both of its clauses
+  // appears once, at the severity of its most severe finding.
+  crossClauseIssues: Array<CrossClauseIssue & { severity: Severity }>;
+  // Whether related clauses were supplied as context (CLAUSE_LINKING), recorded for evaluation runs.
+  clauseLinking: boolean;
   protectionReport: Protection[];
   missingProtections: Protection[];
   suggestedAdditions: Protection[];

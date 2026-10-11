@@ -86,6 +86,46 @@
               }
             }
           },
+          "expectedLinks": {
+            "description": "Clauses the analysis of `from` must be supplied with, and why.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["from", "to", "relation", "reason"],
+              "properties": {
+                "from": { "type": "string", "pattern": "^C[0-9]{3}$" },
+                "to": { "type": "string", "pattern": "^C[0-9]{3}$" },
+                "relation": {
+                  "enum": [
+                    "SAME_SECTION",
+                    "REFERENCES",
+                    "REFERENCED_BY",
+                    "OVERRIDES",
+                    "OVERRIDDEN_BY",
+                    "DEFINES_VALUE",
+                    "RELATED_TOPIC",
+                    "SIMILAR_TEXT"
+                  ]
+                },
+                "reason": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "unexpectedLinks": {
+            "description": "Clauses that must not be supplied as context for `from` (e.g. a misleading value).",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["from", "to", "reason"],
+              "properties": {
+                "from": { "type": "string", "pattern": "^C[0-9]{3}$" },
+                "to": { "type": "string", "pattern": "^C[0-9]{3}$" },
+                "reason": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
           "missingProtectionIds": {
             "type": "array",
             "uniqueItems": true,
