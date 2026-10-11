@@ -112,5 +112,6 @@ export const env = Object.freeze({
   requestLimitPerMinute: integer("REQUEST_LIMIT_PER_MINUTE", 120, 10, 10_000),
   lawSyncRetentionDays: integer("LAW_SYNC_RETENTION_DAYS", 90, 7, 3_650),
   lawSyncLeaseMinutes: integer("LAW_SYNC_LEASE_MINUTES", 55, 5, 59),
+  lawAutoApprovalSettleHours: integer("LAW_AUTO_APPROVAL_SETTLE_HOURS", 24, 0, 720),
   analysisTargetMs: integer("ANALYSIS_TARGET_MS", 90_000, 10_000, 600_000),
 });

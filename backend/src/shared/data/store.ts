@@ -261,7 +261,7 @@ export class MemoryDataStore implements DataStore {
   }
 
   async healthCheck() {
-    const activeLawCount = [...this.lawSourceStates.values()].filter((state) => state.status === "ACTIVE").length;
+    const activeLawCount = [...this.lawSourceStates.values()].filter((state) => state.activeRevisionId !== null).length;
     const activeEmbeddingCount = this.lawEmbeddings.filter((item) => item.status === "ACTIVE").length;
     return { database: true, activeLawCount, activeEmbeddingCount, vectorSearch: activeEmbeddingCount > 0 };
   }
@@ -588,7 +588,7 @@ class MongoDataStore implements DataStore {
   async healthCheck() {
     await this.db.command({ ping: 1 });
     const [activeLawCount, activeEmbeddingCount] = await Promise.all([
-      this.collection<LawSourceState>("law_source_states").countDocuments({ status: "ACTIVE" }),
+      this.collection<LawSourceState>("law_source_states").countDocuments({ activeRevisionId: { $ne: null } }),
       this.collection<LawEmbeddingRecord>("law_embeddings").countDocuments({ status: "ACTIVE" }),
     ]);
     let vectorSearch = false;

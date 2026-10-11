@@ -292,6 +292,7 @@ export type LawSourceState = {
 export type LawSyncStatus =
   | "UNCHANGED"
   | "CANDIDATE_STAGED"
+  | "AUTO_APPROVED"
   | "OFFICIAL_UPDATE_PENDING"
   | "WIKISOURCE_CHANGED"
   | "FAILED";

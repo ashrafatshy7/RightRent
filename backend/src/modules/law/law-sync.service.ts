@@ -21,6 +21,8 @@ import {
 } from "./wikisource-law.service.js";
 
 const EMBEDDING_BATCH_SIZE = 32;
+const MIN_RETAINED_SECTION_RATIO = 0.9;
+export const AUTO_APPROVER = "RightRent auto-approval";
 
 function israelDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -193,6 +195,51 @@ async function createEmbeddingRecords(
   return records;
 }
 
+// A staged candidate replaces the approved version without review only when an official source
+// accounts for the change, the Wikisource revision has stood unedited long enough for vandalism
+// or a half-finished consolidation to be reverted or completed, and the section manifest has not
+// collapsed the way it does when the parser stops recognizing the page. Anything else, including
+// the first version of a law, waits for an administrator while the approved version stays in use.
+function autoApprovalReference(state: LawSourceState) {
+  if (state.activeRevisionId === null
+    || state.candidateRevisionId !== state.observedRevisionId
+    || state.candidateUnmatched
+    || !state.activeSectionKeys.length) return null;
+  const settledMs = Date.now() - Date.parse(state.observedRevisionTimestamp);
+  if (!(settledMs >= env.lawAutoApprovalSettleHours * 60 * 60 * 1_000)) return null;
+  const candidateKeys = new Set(state.candidateSectionKeys);
+  const retained = state.activeSectionKeys.filter((key) => candidateKeys.has(key)).length;
+  if (retained < state.activeSectionKeys.length * MIN_RETAINED_SECTION_RATIO) return null;
+
+  const cause = state.candidateOfficialFingerprint === state.activeOfficialFingerprint
+    ? `a deferred amendment in force on ${state.candidateSourceAsOf}, matching approved revision ${state.activeRevisionId}`
+    : `the Knesset publication of ${state.latestOfficialPublicationDate}`;
+  return `Explained by ${cause}. Wikisource revision ${state.candidateRevisionId} unedited since `
+    + `${state.observedRevisionTimestamp}; ${retained}/${state.activeSectionKeys.length} approved sections retained.`;
+}
+
+// Activation happens after the check is recorded, so a failure here must not reach the check's
+// error handling, which would overwrite the staged state with the one read before the check.
+async function autoApprove(state: LawSourceState, sync: LawSyncRecord): Promise<LawSyncRecord> {
+  const reference = autoApprovalReference(state);
+  if (!reference) return sync;
+  try {
+    const active = await (await getStore()).activateLawVersion(
+      state.israelLawId,
+      state.candidateRevisionId!,
+      state.candidateContentHash!,
+      state.candidateSectionCount!,
+      state.candidateSectionsHash!,
+      AUTO_APPROVER,
+      reference,
+    );
+    return active ? { ...sync, status: "AUTO_APPROVED" } : sync;
+  } catch (error) {
+    console.error(`Auto-approval of law ${state.israelLawId} failed; the candidate stays staged for review.`, error);
+    return sync;
+  }
+}
+
 export async function checkMonitoredLaw(source: MonitoredLawSource) {
   const store = await getStore();
   const previous = await store.getLawSourceState(source.israelLawId);
@@ -243,7 +290,7 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
       };
       const sync = syncRecord(source, "UNCHANGED", checkedAt, official, wiki);
       await store.recordLawCheck(state, sync);
-      return sync;
+      return autoApprove(state, sync);
     }
 
     let candidateUnmatched = false;
@@ -285,7 +332,7 @@ export async function checkMonitoredLaw(source: MonitoredLawSource) {
       wiki,
     );
     await store.stageLawVersion(embeddings, state, sync);
-    return sync;
+    return autoApprove(state, sync);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown synchronization error";
     const state = failedState(source, previous, checkedAt, reason);

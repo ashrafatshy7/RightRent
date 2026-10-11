@@ -41,7 +41,8 @@ export function AdminLawsPage() {
     mutationFn: () => api.syncLaws(token!),
     onSuccess: ({ checks }) => {
       const failures = checks.filter((check) => check.status === "FAILED").length;
-      setNotice(failures ? `הבדיקה הסתיימה עם ${failures} כשלים.` : "בדיקת המקורות הסתיימה בהצלחה.");
+      const autoApproved = checks.filter((check) => check.status === "AUTO_APPROVED").length;
+      setNotice(`${failures ? `הבדיקה הסתיימה עם ${failures} כשלים.` : "בדיקת המקורות הסתיימה בהצלחה."}${autoApproved ? ` חוקים שעודכנו אוטומטית: ${autoApproved}.` : ""}`);
       queryClient.invalidateQueries({ queryKey: ["admin", "laws"] });
       queryClient.invalidateQueries({ queryKey: ["readiness"] });
     },
@@ -102,7 +103,8 @@ export function AdminLawsPage() {
 }
 
 function ReadinessBoard({ readiness, laws }: { readiness: Readiness; laws: LawSourceState[] }) {
-  const active = laws.filter((law) => law.status === "ACTIVE").length;
+  // A law with a pending or failed check still serves its approved version.
+  const active = laws.filter((law) => law.activeRevisionId !== null).length;
   const review = laws.filter((law) => law.status === "AWAITING_VERIFICATION" || law.status === "WIKISOURCE_CHANGED").length;
   const failed = laws.filter((law) => law.status === "FAILED").length;
   const cards = [
@@ -155,6 +157,7 @@ function LawReviewPanel({ law, reviewer, token, onClose, onApproved }: { law: La
           <section className="source-links"><a href={law.knessetUrl} target="_blank" rel="noreferrer"><span><SearchCheck size={20} /></span><div><strong>מאגר החקיקה של הכנסת</strong><small>פרסומים, תיקונים וקשרי חקיקה</small></div><ExternalLink size={16} /></a><a href={permanentWikiUrl} target="_blank" rel="noreferrer"><span><BookCheck size={20} /></span><div><strong>הגרסה המאוחדת הקפואה</strong><small>revision {law.candidateRevisionId ?? law.observedRevisionId}</small></div><ExternalLink size={16} /></a></section>
           {law.error ? <div className="law-error"><FileWarning size={20} /><div><strong>הסנכרון נעצר</strong><p>{law.error}</p></div></div> : null}
           {unmatched && canApprove ? <div className="law-error"><AlertTriangle size={20} /><div><strong>שינוי ללא תיקון רשמי</strong><p>הנוסח בוויקיטקסט השתנה בלי פרסום חדש בכנסת ובלי תיקון מאושר שנכנס לתוקף. יש להשוות את הסעיפים שהשתנו מול הנוסח הרשמי לפני האישור.</p></div></div> : null}
+          {law.activeRevisionId !== null ? <section className="candidate-facts"><h3>הגרסה שמשמשת לניתוח</h3><div className="fact-grid"><Fact label="Revision" value={String(law.activeRevisionId)} /><Fact label="מספר סעיפים" value={formatNumber(law.activeSectionCount)} /></div><p className="verification-note">אושרה על ידי {law.verifiedBy ?? "—"} · {formatDate(law.verifiedAt)}</p>{law.verificationReference ? <p className="verification-note" dir="ltr">{law.verificationReference}</p> : null}</section> : null}
           <section className="candidate-facts"><h3>טביעת האצבע של המועמד</h3><div className="fact-grid"><Fact label="Revision" value={String(law.candidateRevisionId ?? "—")} /><Fact label="מספר סעיפים" value={formatNumber(law.candidateSectionCount)} /><Fact label="Content hash" value={shortHash(law.candidateContentHash)} title={law.candidateContentHash ?? undefined} /><Fact label="Sections hash" value={shortHash(law.candidateSectionsHash)} title={law.candidateSectionsHash ?? undefined} /></div></section>
           <section className="section-manifest"><div><h3>Manifest הסעיפים</h3><span>{law.candidateSectionKeys.length} מזהים</span></div>{law.candidateSectionKeys.length ? <details><summary>פתיחת הרשימה המלאה</summary><ol>{law.candidateSectionKeys.map((key) => <li key={key}><code>{key}</code></li>)}</ol></details> : <p>אין רשימת סעיפים זמינה למועמד הזה.</p>}</section>
           {canApprove ? (
