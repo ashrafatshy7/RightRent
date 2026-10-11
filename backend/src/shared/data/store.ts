@@ -26,6 +26,8 @@ export interface DataStore {
   getContract(id: string): Promise<ContractRecord | null>;
   updateContract(contract: ContractRecord): Promise<void>;
   deleteContract(id: string): Promise<void>;
+  // When a version is deleted, the versions that pointed to it no longer have a previous version.
+  unlinkPreviousContract(previousContractId: string): Promise<void>;
   createAnalysis(analysis: AnalysisRecord): Promise<void>;
   getAnalysis(id: string): Promise<AnalysisRecord | null>;
   findAnalysisByInput(contractId: string, analysisInputHash: string): Promise<AnalysisRecord | null>;
@@ -122,6 +124,14 @@ export class MemoryDataStore implements DataStore {
 
   async deleteContract(id: string) {
     this.contracts.delete(id);
+  }
+
+  async unlinkPreviousContract(previousContractId: string) {
+    for (const [id, contract] of this.contracts) {
+      if (contract.previousContractId !== previousContractId) continue;
+      const { previousContractId: _removed, ...rest } = contract;
+      this.contracts.set(id, rest);
+    }
   }
 
   async createAnalysis(analysis: AnalysisRecord) {
@@ -419,6 +429,12 @@ class MongoDataStore implements DataStore {
   }
   async deleteContract(id: string) {
     await this.collection<ContractRecord>("contracts").deleteOne({ id });
+  }
+  async unlinkPreviousContract(previousContractId: string) {
+    await this.collection<ContractRecord>("contracts").updateMany(
+      { previousContractId },
+      { $unset: { previousContractId: "" } },
+    );
   }
   async createAnalysis(analysis: AnalysisRecord) {
     await this.collection<AnalysisRecord>("analyses").insertOne(analysis);

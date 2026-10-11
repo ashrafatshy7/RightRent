@@ -32,7 +32,9 @@ export function isSubstantiveClause(clause: ContractClause): boolean {
   const text = clause.text.trim();
   if (!text) return false;
   if (PAGE_MARKER.test(text) || NUMBER_OR_DATE_ONLY.test(text) || SEPARATOR_ONLY.test(text)) return false;
-  if (DOCUMENT_TITLE_ONLY.test(text) && text.split(/\s+/u).length <= 12) return false;
+  // A long title wraps onto a second line; it is still only the title.
+  const singleLine = text.replace(/\s+/gu, " ");
+  if (DOCUMENT_TITLE_ONLY.test(singleLine) && singleLine.split(" ").length <= 12) return false;
   return true;
 }
 

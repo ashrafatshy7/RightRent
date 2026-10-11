@@ -135,6 +135,7 @@ test("category is derived from the same assessment as severity, independently of
 test("non-substantive clauses (headers, page numbers, the document title) are filtered from findings", () => {
   assert.equal(isSubstantiveClause({ id: "C000", text: "חוזה שכירות למגורים — תרחיש הערכה RR-EVAL-005, תל אביב", locations: [] }), false);
   assert.equal(isSubstantiveClause({ id: "C000", text: "עמוד 2 מתוך 5", locations: [] }), false);
+  assert.equal(isSubstantiveClause({ id: "C000", text: "חוזה שכירות למגורים — תרחיש הערכה, גרסה 2\nלאחר תיקוני המשכיר", locations: [] }), false);
   assert.equal(isSubstantiveClause({ id: "C000", text: "12/03/2026", locations: [] }), false);
   assert.equal(isSubstantiveClause({ id: "C000", text: "----------", locations: [] }), false);
   assert.equal(isSubstantiveClause({ id: "C000", text: "   ", locations: [] }), false);

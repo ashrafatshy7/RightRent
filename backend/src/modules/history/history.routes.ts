@@ -11,9 +11,28 @@ export const historyRouter = Router();
 
 historyRouter.use(requireAuthentication);
 
+// Each analysis comes with its contract's name and place in the contract's version history, so the
+// history can group the versions of one contract and offer to compare them.
 historyRouter.get("/", async (request, response) => {
-  const analyses = await (await getStore()).listAnalyses(request.auth!.userId);
-  response.json({ analyses: analyses.map(publicAnalysis) });
+  const store = await getStore();
+  const analyses = await store.listAnalyses(request.auth!.userId);
+  const contracts = new Map(await Promise.all([...new Set(analyses.map((analysis) => analysis.contractId))]
+    .map(async (contractId) => [contractId, await store.getContract(contractId)] as const)));
+  response.json({
+    analyses: analyses.map((analysis) => {
+      const contract = contracts.get(analysis.contractId);
+      return {
+        ...publicAnalysis(analysis),
+        contract: contract ? {
+          id: contract.id,
+          originalFileName: contract.originalFileName,
+          version: contract.version ?? 1,
+          rootContractId: contract.rootContractId ?? contract.id,
+          previousContractId: contract.previousContractId ?? null,
+        } : null,
+      };
+    }),
+  });
 });
 
 historyRouter.delete("/:id", async (request, response) => {
@@ -26,7 +45,10 @@ historyRouter.delete("/:id", async (request, response) => {
   await store.deleteNegotiation(analysis.analysisId);
   await store.deleteAnalysis(analysis.analysisId);
   const remainingAnalyses = await store.countAnalysesByContract(analysis.contractId);
-  if (remainingAnalyses === 0) await store.deleteContract(analysis.contractId);
+  if (remainingAnalyses === 0) {
+    await store.deleteContract(analysis.contractId);
+    await store.unlinkPreviousContract(analysis.contractId);
+  }
   await Promise.all([
     analysis.markedPdf
       ? rm(path.join(env.markedPdfDirectory, analysis.markedPdf.storageKey), { force: true })

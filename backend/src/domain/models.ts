@@ -56,6 +56,11 @@ export type ContractRecord = {
   isScanned: boolean;
   extractionMs: number;
   clauses: ContractClause[];
+  // A revised contract (e.g. the landlord's answer to requested changes) points to the version it
+  // replaces; all versions share the first one's ID as rootContractId. Absent on a first version.
+  previousContractId?: string;
+  rootContractId?: string;
+  version?: number;
   uploadedAt: string;
   updatedAt: string;
 };
