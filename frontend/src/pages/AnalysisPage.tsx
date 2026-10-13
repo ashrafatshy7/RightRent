@@ -38,6 +38,10 @@ const ContractViewer = lazy(() => import("../components/ContractViewer"));
 
 const NARROW_LAYOUT_QUERY = "(max-width: 1080px)";
 
+// Object URLs of opened marked PDFs, kept for the life of the app. Safari re-reads the blob when the
+// opened PDF is clicked, so revoking it on a timer broke the tab ("WebKitBlobResource error 1").
+const markedPdfUrls = new Map<string, string>();
+
 function prefersReducedMotion() {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -188,10 +192,12 @@ export function AnalysisPage() {
   async function openMarkedPdf() {
     setPdfError(null);
     try {
-      const blob = await api.getMarkedPdf(token!, analysisId);
-      const url = URL.createObjectURL(blob);
+      let url = markedPdfUrls.get(analysisId);
+      if (!url) {
+        url = URL.createObjectURL(await api.getMarkedPdf(token!, analysisId));
+        markedPdfUrls.set(analysisId, url);
+      }
       window.open(url, "_blank", "noopener,noreferrer");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       setPdfError(messageForError(error));
     }
