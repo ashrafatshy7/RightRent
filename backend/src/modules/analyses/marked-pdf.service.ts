@@ -25,16 +25,61 @@ function union(left: Box, right: Box): Box {
 // A clause is stored as one box per word, which drew as a mosaic of word boxes. The extractor groups
 // whole lines into a clause, so the union of a clause's boxes on a page covers that clause alone and
 // is drawn as a single mark per clause per page.
-function clauseBoxesByPage(locations: ClauseLocation[]) {
-  const byPage = new Map<number, Box>();
+
+function clauseBoxesByPage(
+  locations: ClauseLocation[]
+): Array<[number, Box]> {
+  const linesByPage = new Map<number, Box[]>();
+
+  // Group words into their printed lines.
   for (const { page, bbox } of locations) {
-    const [x, y, width, height] = bbox;
-    const box: Box = [x, y - height * DESCENDER_RATIO, width, height * (1 + DESCENDER_RATIO)];
-    const existing = byPage.get(page);
-    byPage.set(page, existing ? union(existing, box) : box);
+    const lines = linesByPage.get(page) ?? [];
+
+    const lineIndex = lines.findIndex(
+      (line) =>
+        Math.abs(line[1] - bbox[1]) <
+        Math.min(line[3], bbox[3]) * 0.5
+    );
+
+    if (lineIndex >= 0) {
+      lines[lineIndex] = union(lines[lineIndex]!, bbox);
+    } else {
+      lines.push([...bbox]);
+    }
+
+    linesByPage.set(page, lines);
   }
-  return byPage;
+
+  const result: Array<[number, Box]> = [];
+
+  for (const [page, lines] of linesByPage) {
+    lines.sort((a, b) => b[1] - a[1]);
+
+    let block: Box | null = null;
+    let previousLine: Box | null = null;
+
+    for (const line of lines) {
+      const adjacent =
+        previousLine !== null &&
+        previousLine[1] - line[1] <=
+          Math.max(previousLine[3], line[3]) * 1.8;
+
+      if (block && adjacent) {
+        block = union(block, line);
+      } else {
+        if (block) result.push([page, block]);
+        block = [...line];
+      }
+
+      previousLine = line;
+    }
+
+    if (block) result.push([page, block]);
+  }
+
+  return result;
 }
+
 
 export async function createMarkedPdf(source: Buffer, analysisId: string, findings: Finding[]) {
   const document = await PDFDocument.load(source, { ignoreEncryption: false });
