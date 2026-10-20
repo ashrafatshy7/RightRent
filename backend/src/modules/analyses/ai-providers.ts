@@ -11,7 +11,6 @@ import type {
   FindingTopic,
   LawChunk,
   LegalAssessment,
-  NegotiationStrategy,
   TenantPreferences,
 } from "../../domain/models.js";
 import { HttpError } from "../../shared/http/http-error.js";
@@ -32,8 +31,6 @@ const PROTECTION_EFFORT = "low";
 const PROTECTION_MAX_TOKENS = 16_000;
 const FINANCIAL_EFFORT = "low";
 const FINANCIAL_MAX_TOKENS = 8_000;
-const TEXT_EFFORT = "low";
-const TEXT_MAX_TOKENS = 3_000;
 
 const hebrewTextSchema = z.string().regex(/[֐-׿]/u);
 
@@ -265,7 +262,13 @@ const PROTECTION_SYSTEM = [
   "Use only supplied clause IDs and law reference IDs. Return JSON only.",
 ].join(" ");
 
-type TokenUsage = { inputTokens: number | null; outputTokens: number | null };
+type TokenUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  // Prompt-cache traffic, which input_tokens does not include.
+  cacheReadInputTokens?: number | null;
+  cacheCreationInputTokens?: number | null;
+};
 
 export type ProviderVerdict = {
   title: string;
@@ -293,12 +296,34 @@ export type RelatedClauseContext = {
   excerpt: string;
 };
 
-type ClaudeMessage = { text: string; stopReason: string | null; usage: TokenUsage };
+// A response content block, kept exactly as Anthropic sent it so an agent loop can send it back:
+// thinking blocks must be returned unchanged (signature included) on the next request.
+export type ClaudeContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking: string; signature: string }
+  | { type: "redacted_thinking"; data: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown };
+
+type ClaudeMessage = {
+  text: string;
+  content: ClaudeContentBlock[];
+  stopReason: string | null;
+  usage: TokenUsage;
+};
 
 type AnthropicStreamEvent = {
   type?: string;
-  message?: { usage?: { input_tokens?: number } };
-  delta?: { type?: string; text?: string; stop_reason?: string | null };
+  index?: number;
+  message?: { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } };
+  content_block?: { type?: string; text?: string; thinking?: string; signature?: string; data?: string; id?: string; name?: string };
+  delta?: {
+    type?: string;
+    text?: string;
+    thinking?: string;
+    signature?: string;
+    partial_json?: string;
+    stop_reason?: string | null;
+  };
   usage?: { output_tokens?: number };
   error?: { type?: string; message?: string };
 };
@@ -382,9 +407,16 @@ async function providerJson(
   throw new HttpError(502, "AI_PROVIDER_ERROR", `${service} request failed after retries.`);
 }
 
-async function readClaudeStream(response: Response, onActivity: () => void, service: string) {
+async function readClaudeStream(
+  response: Response,
+  onActivity: () => void,
+  service: string,
+  onText?: (delta: string) => void,
+) {
   if (!response.body) throw new HttpError(502, "AI_PROVIDER_ERROR", `${service} returned no response stream.`);
-  const message: ClaudeMessage = { text: "", stopReason: null, usage: { inputTokens: null, outputTokens: null } };
+  const message: ClaudeMessage = { text: "", content: [], stopReason: null, usage: { inputTokens: null, outputTokens: null } };
+  // Tool inputs arrive as JSON fragments; they are parsed once the block is complete.
+  const toolInputJson = new Map<number, string>();
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffered = "";
@@ -403,8 +435,47 @@ async function readClaudeStream(response: Response, onActivity: () => void, serv
       const event = JSON.parse(data) as AnthropicStreamEvent;
       if (event.type === "message_start") {
         message.usage.inputTokens = event.message?.usage?.input_tokens ?? null;
-      } else if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-        message.text += event.delta.text ?? "";
+        const cacheRead = event.message?.usage?.cache_read_input_tokens;
+        const cacheCreation = event.message?.usage?.cache_creation_input_tokens;
+        if (cacheRead !== undefined) message.usage.cacheReadInputTokens = cacheRead;
+        if (cacheCreation !== undefined) message.usage.cacheCreationInputTokens = cacheCreation;
+      } else if (event.type === "content_block_start" && event.index !== undefined) {
+        const block = event.content_block;
+        if (block?.type === "text") {
+          message.content[event.index] = { type: "text", text: block.text ?? "" };
+        } else if (block?.type === "thinking") {
+          message.content[event.index] = { type: "thinking", thinking: block.thinking ?? "", signature: block.signature ?? "" };
+        } else if (block?.type === "redacted_thinking") {
+          message.content[event.index] = { type: "redacted_thinking", data: block.data ?? "" };
+        } else if (block?.type === "tool_use") {
+          message.content[event.index] = { type: "tool_use", id: block.id ?? "", name: block.name ?? "", input: {} };
+          toolInputJson.set(event.index, "");
+        }
+      } else if (event.type === "content_block_delta") {
+        const block = event.index === undefined ? undefined : message.content[event.index];
+        if (event.delta?.type === "text_delta") {
+          const delta = event.delta.text ?? "";
+          message.text += delta;
+          if (block?.type === "text") block.text += delta;
+          if (delta) onText?.(delta);
+        } else if (event.delta?.type === "thinking_delta" && block?.type === "thinking") {
+          block.thinking += event.delta.thinking ?? "";
+        } else if (event.delta?.type === "signature_delta" && block?.type === "thinking") {
+          block.signature += event.delta.signature ?? "";
+        } else if (event.delta?.type === "input_json_delta" && event.index !== undefined) {
+          toolInputJson.set(event.index, (toolInputJson.get(event.index) ?? "") + (event.delta.partial_json ?? ""));
+        }
+      } else if (event.type === "content_block_stop" && event.index !== undefined) {
+        const block = message.content[event.index];
+        if (block?.type === "tool_use") {
+          const json = toolInputJson.get(event.index) ?? "";
+          try {
+            block.input = json ? JSON.parse(json) as unknown : {};
+          } catch {
+            // Left unparsed; the agent's schema validation rejects it and the model is told to retry.
+            block.input = { invalidJson: json };
+          }
+        }
       } else if (event.type === "message_delta") {
         message.stopReason = event.delta?.stop_reason ?? message.stopReason;
         message.usage.outputTokens = event.usage?.output_tokens ?? message.usage.outputTokens;
@@ -417,13 +488,18 @@ async function readClaudeStream(response: Response, onActivity: () => void, serv
     if (done) break;
   }
   if (message.stopReason === null) throw new Error("The stream ended before the message was complete.");
+  message.content = message.content.filter(Boolean);
   return message;
 }
 
 // Every Claude call streams: a long but healthy generation never hits a fixed timeout, and a
 // request fails only when the stream stays silent (Anthropic sends pings while the model thinks).
 // A stream that breaks midway is not retried, because the tokens produced so far are billed.
-async function createClaudeMessage(body: Record<string, unknown>, service: string): Promise<ClaudeMessage> {
+async function createClaudeMessage(
+  body: Record<string, unknown>,
+  service: string,
+  onText?: (delta: string) => void,
+): Promise<ClaudeMessage> {
   if (!env.anthropicApiKey) {
     throw new HttpError(503, "ANALYSIS_PROVIDER_NOT_CONFIGURED", "ANTHROPIC_API_KEY is not configured.");
   }
@@ -460,7 +536,7 @@ async function createClaudeMessage(body: Record<string, unknown>, service: strin
         continue;
       }
       try {
-        return await readClaudeStream(response, resetIdleTimer, service);
+        return await readClaudeStream(response, resetIdleTimer, service, onText);
       } catch (error) {
         if (error instanceof HttpError) throw error;
         const reason = controller.signal.aborted ? "TimeoutError" : error instanceof Error ? error.name : "stream_error";
@@ -895,50 +971,44 @@ export const FINANCIAL_REQUEST_FINGERPRINT = requestFingerprint({
   code: extractFinancialTermsWithClaude.toString(),
 });
 
-async function generateClaudeText(system: string, user: string) {
-  const service = "Anthropic negotiation text";
-  const message = await createClaudeMessage({
-    max_tokens: TEXT_MAX_TOKENS,
-    thinking: { type: "adaptive" },
-    output_config: { effort: TEXT_EFFORT },
-    system,
-    messages: [{ role: "user", content: user }],
-  }, service);
-  const text = completeText(message, service);
-  if (!text) throw new HttpError(502, "INVALID_ANALYSIS_RESPONSE", "Anthropic returned no text.");
-  return text;
-}
-
-export function generateNegotiationDraft(
-  findings: Finding[],
-  priorities: string[],
-  strategies: Record<string, NegotiationStrategy>,
+// One request of an agent loop (see negotiations/negotiation-agent.ts): the caller owns the loop,
+// the tools, and the conversation; text is forwarded as it streams.
+export async function streamClaudeTurn(
+  body: Record<string, unknown>,
+  service: string,
+  onText?: (delta: string) => void,
 ) {
-  const selected = priorities.map((clauseId) => ({
-    finding: findings.find((item) => item.clauseId === clauseId),
-    strategy: strategies[clauseId],
-  }));
-  return generateClaudeText(
-    "Draft one concise, respectful Hebrew WhatsApp message from a tenant to a landlord. " +
-      "Use interest-based negotiation. Where a selected issue has a suggestedReplacementText, base the concrete ask on it. " +
-      "Include only supplied legal references. Never claim the message was sent.",
-    `SELECTED_ISSUES=${JSON.stringify(selected)}\nReturn only the editable message text.`,
-  );
+  const message = await createClaudeMessage(body, service, onText);
+  if (message.stopReason === "max_tokens") {
+    throw new HttpError(502, "AI_RESPONSE_TRUNCATED", `${service} stopped at the output token limit.`);
+  }
+  if (message.stopReason === "refusal") {
+    throw new HttpError(502, "AI_RESPONSE_REFUSED", `${service} declined to answer.`);
+  }
+  return { content: message.content, stopReason: message.stopReason, usage: message.usage };
 }
 
-export async function generateLikelyLandlordReplies(redactedDraft: string) {
-  const text = await generateClaudeText(
-    "Prepare three concise Hebrew response strategies for likely landlord reactions. " +
-      "The tenant remains the decision maker. Return a JSON array of three strings only.",
-    `<REDACTED_TENANT_DRAFT>${redactedDraft}</REDACTED_TENANT_DRAFT>`,
-  );
+// A single structured-output request whose JSON answer is checked against `schema`.
+export async function generateClaudeJson<T>(
+  request: { system: string; user: string; outputSchema: object; effort: string; maxTokens: number },
+  schema: z.ZodType<T>,
+  service: string,
+): Promise<T> {
+  const message = await createClaudeMessage({
+    max_tokens: request.maxTokens,
+    thinking: { type: "adaptive" },
+    output_config: { effort: request.effort, format: { type: "json_schema", schema: request.outputSchema } },
+    system: request.system,
+    messages: [{ role: "user", content: request.user }],
+  }, service);
+  const text = withoutJsonFence(completeText(message, service));
   let parsed: unknown;
   try {
-    parsed = JSON.parse(withoutJsonFence(text));
+    parsed = JSON.parse(text);
   } catch {
-    throw new HttpError(502, "INVALID_ANALYSIS_RESPONSE", "Anthropic returned invalid reply JSON.");
+    throw new HttpError(502, "INVALID_ANALYSIS_RESPONSE", `${service} returned invalid JSON.`);
   }
-  const result = z.array(z.string().min(1).max(1_000)).length(3).safeParse(parsed);
-  if (!result.success) throw new HttpError(502, "INVALID_ANALYSIS_RESPONSE", "Anthropic returned invalid replies.");
+  const result = schema.safeParse(parsed);
+  if (!result.success) throw new HttpError(502, "INVALID_ANALYSIS_RESPONSE", `${service} returned an invalid answer.`);
   return result.data;
 }

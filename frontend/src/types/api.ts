@@ -390,3 +390,62 @@ export type LawApproval = {
   verifiedBy: string;
   verificationReference: string;
 };
+
+export type NegotiationState = "PRIORITIZE" | "STRATEGY" | "DRAFT" | "COUNTER" | "DONE";
+export type NegotiationStrategyKind = "CITE_LAW" | "PROPOSE_ALTERNATIVE" | "CONCEDE";
+export type AddressForm = "MASCULINE" | "FEMININE" | "PLURAL";
+
+export type NegotiationIssue = {
+  issueId: string;
+  kind: "CLAUSE" | "MISSING_PROTECTION" | "TENANT_REQUEST";
+  severity: "RED" | "ORANGE" | "SUGGESTION" | "TENANT";
+  title: string;
+  summary: string;
+  legalReferences: Array<Pick<LegalReference, "lawReferenceId" | "lawName" | "section" | "sourceUrl">>;
+};
+
+export type IssueStrategy = { kind: NegotiationStrategyKind; request: string | null; fallback: string | null };
+
+export type NegotiationDraftSource = {
+  issueId: string;
+  title: string;
+  references: Array<Pick<LegalReference, "lawReferenceId" | "lawName" | "section" | "sourceUrl" | "excerpt">>;
+};
+
+export type NegotiationChatMessage = {
+  id: string;
+  role: "AGENT" | "TENANT";
+  text: string;
+  quickReplies: string[];
+  createdAt: string;
+};
+
+export type LikelyReply = { issueId: string | null; landlordReply: string; suggestedResponse: string };
+
+export type Negotiation = {
+  id: string;
+  analysisId: string;
+  state: NegotiationState;
+  addressForm: AddressForm | null;
+  issues: NegotiationIssue[];
+  priorities: string[];
+  strategies: Record<string, IssueStrategy>;
+  currentIssueId: string | null;
+  draft: {
+    text: string;
+    editedByTenant: boolean;
+    warnings: string[];
+    sources: NegotiationDraftSource[];
+  } | null;
+  likelyReplies: LikelyReply[];
+  messages: NegotiationChatMessage[];
+  turnsLeft: number;
+  agentMode: "CLAUDE" | "SCRIPTED";
+  updatedAt: string;
+};
+
+export type NegotiationAction =
+  | { action: "START"; restart?: boolean }
+  | { action: "SAVE_DRAFT"; draft: string }
+  | { action: "FINALIZE_DRAFT" }
+  | { action: "COMPLETE" };

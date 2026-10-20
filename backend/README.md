@@ -109,9 +109,20 @@ These are the browser-safe management routes used by the frontend. The server ve
 administrator from its own allowlist; the frontend never receives or sends the internal
 maintenance token.
 
-Negotiation actions are `START`, `SET_PRIORITIES`, `CHOOSE_STRATEGY`, `SAVE_DRAFT`, and
-`COMPLETE`. The only valid state path is `PRIORITIZE -> STRATEGY -> DRAFT -> COUNTER -> DONE`.
-The backend prepares text but never contacts a landlord or sends a WhatsApp message.
+The negotiation agent is a conversation between the tenant and Claude, run as a state machine
+(`PRIORITIZE -> STRATEGY -> DRAFT -> COUNTER -> DONE`, plus `DRAFT -> STRATEGY` when the tenant
+adds an issue). `POST /api/negotiation/:analysisId/messages` with `{ "text": string }` sends one
+tenant message and streams the reply as `application/x-ndjson` (`text`, `negotiation`, then
+`result` or `error`). `POST /api/negotiation/:analysisId` takes `START` (`restart` optional),
+`SAVE_DRAFT` (the tenant's own edit), `FINALIZE_DRAFT`, and `COMPLETE`.
+
+The model changes the negotiation only through tools that the server validates against the current
+state (`src/modules/negotiations/negotiation-agent.ts`). A drafted message is rejected, and the
+model asked to fix it, unless every law section it names belongs to a cited legal reference of a
+raised issue and every number in it appears in the analysis, the law excerpts, or the tenant's own
+messages (`negotiation-grounding.ts`). Tenant messages are redacted before they reach the model.
+Without `ANALYSIS_PROVIDER=anthropic`, a scripted stand-in drives the same tools and checks. The
+backend prepares text but never contacts a landlord or sends a WhatsApp message.
 
 Internal maintenance:
 

@@ -65,19 +65,15 @@ export const costScenarioSchema = z.object({
 export const costSimulationRequestSchema = z.object({ scenario: costScenarioSchema.optional() }).strict();
 
 export const negotiationRequestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("START") }).strict(),
-  z.object({
-    action: z.literal("SET_PRIORITIES"),
-    clauseIds: z.array(z.string().min(1)).min(1),
-  }).strict(),
-  z.object({
-    action: z.literal("CHOOSE_STRATEGY"),
-    clauseId: z.string().min(1),
-    strategy: z.enum(["CITE_LAW", "PROPOSE_ALTERNATIVE", "CONCEDE"]),
-  }).strict(),
+  z.object({ action: z.literal("START"), restart: z.boolean().optional() }).strict(),
   z.object({
     action: z.literal("SAVE_DRAFT"),
-    draft: z.string().trim().min(1).max(5_000),
+    draft: z.string().trim().min(1).max(3_000),
   }).strict(),
+  z.object({ action: z.literal("FINALIZE_DRAFT") }).strict(),
   z.object({ action: z.literal("COMPLETE") }).strict(),
 ]);
+
+export const negotiationMessageSchema = z.object({
+  text: z.string().trim().min(1).max(1_000),
+}).strict();

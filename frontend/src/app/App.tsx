@@ -11,6 +11,7 @@ import { ComparePage } from "../pages/ComparePage";
 import { DashboardPage } from "../pages/DashboardPage";
 import { HistoryPage } from "../pages/HistoryPage";
 import { LandingPage } from "../pages/LandingPage";
+import { NegotiationPage } from "../pages/NegotiationPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { PreferencesPage } from "../pages/PreferencesPage";
 import { UploadPage } from "../pages/UploadPage";
@@ -48,6 +49,7 @@ export function App() {
             <Route path="preferences" element={<PreferencesPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="analysis/:analysisId" element={<AnalysisPage />} />
+            <Route path="analysis/:analysisId/negotiation" element={<NegotiationPage />} />
             <Route path="compare/:baseId/:targetId" element={<ComparePage />} />
             <Route path="admin/laws" element={<AdminRoute />} />
           </Route>
