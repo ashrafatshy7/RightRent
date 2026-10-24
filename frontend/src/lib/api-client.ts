@@ -212,7 +212,7 @@ export const api = Object.freeze({
     { method: "PUT", body: JSON.stringify(overrides) },
     token,
   ),
-  getNegotiation: (token: string, analysisId: string) => request<{ negotiation: Negotiation }>(API_PATHS.negotiation(analysisId), {}, token),
+  getNegotiation: (token: string, analysisId: string) => request<{ negotiation: Negotiation | null }>(API_PATHS.negotiation(analysisId), {}, token),
   negotiationAction: (token: string, analysisId: string, action: NegotiationAction) => request<{ negotiation: Negotiation }>(
     API_PATHS.negotiation(analysisId),
     { method: "POST", body: JSON.stringify(action) },

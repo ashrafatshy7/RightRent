@@ -444,13 +444,27 @@ test("the negotiation agent talks the tenant from PRIORITIZE to DONE and never s
     body: JSON.stringify(body),
   }));
 
-  let response = await post({ action: "START" });
+  // Not started yet is a state, not an error.
+  let response = await fetch(`${baseUrl}/api/negotiation/${analysisId}`, authenticated());
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).negotiation, null);
+
+  response = await post({ action: "START" });
   assert.equal(response.status, 200);
   let negotiation = (await response.json()).negotiation;
   assert.equal(negotiation.state, "PRIORITIZE");
   assert.equal(negotiation.messages.length, 1);
   assert.deepEqual(negotiation.messages[0].quickReplies, ["בלשון זכר", "בלשון נקבה", "בלשון רבים"]);
   assert.equal("modelMessages" in negotiation, false);
+  // The agent starts out knowing the tenant's preferences and the whole (redacted) contract.
+  const started = await (await getStore()).getNegotiation(analysisId);
+  assert.ok(started?.context.preferences.some((line) => line.startsWith("תקציב מקסימלי לשכר דירה חודשי")));
+  assert.ok(started?.context.clauses.some((clause) => clause.clauseId === "C002" && /30000/u.test(clause.text)));
+  // Each flagged issue says why it was flagged, what the law says, and which preferences it touches.
+  const guarantee = started?.issues.find((issue) => issue.issueId === "C002");
+  assert.ok(guarantee?.flaggedBecause.includes("סותר את החוק"));
+  assert.ok(guarantee?.legalReferences.some((reference) => reference.section === "25י"));
+  assert.ok(guarantee?.relevantPreferences.some((line) => line.startsWith("סוגי הבטוחה שהוא מוכן לתת")));
 
   // A state-skipping action is refused.
   response = await post({ action: "FINALIZE_DRAFT" });

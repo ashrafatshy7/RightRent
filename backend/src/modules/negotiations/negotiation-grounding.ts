@@ -29,7 +29,16 @@ function checkFact(check: DeterministicCheck) {
     + `${check.formula ? ` (${check.formula})` : ""} - ${verdict}.`;
 }
 
-function findingIssue(finding: Finding): NegotiationIssue {
+function flaggedBecause(finding: Finding) {
+  return [
+    finding.legalAssessment.violatesLaw ? "סותר את החוק" : null,
+    finding.legalAssessment.riskWarning ? "סיכון חוזי לשוכר" : null,
+    finding.legalAssessment.preferenceConflict ? "מתנגש עם ההעדפות של השוכר" : null,
+    finding.crossClauseIssue ? `בעייתי בשילוב עם סעיפים אחרים: ${finding.crossClauseIssue.explanation}` : null,
+  ].filter((reason): reason is string => reason !== null);
+}
+
+function findingIssue(finding: Finding, relevantPreferences: (finding: Finding) => string[]): NegotiationIssue {
   return {
     issueId: finding.clauseId,
     kind: "CLAUSE",
@@ -41,6 +50,10 @@ function findingIssue(finding: Finding): NegotiationIssue {
     clauseQuote: finding.clauseQuote || null,
     suggestedText: finding.suggestedReplacementText ?? null,
     facts: (finding.deterministicChecks ?? []).map(checkFact),
+    flaggedBecause: flaggedBecause(finding),
+    explanation: finding.explanation || null,
+    recommendedAction: finding.recommendedAction ?? null,
+    relevantPreferences: relevantPreferences(finding),
     legalReferences: finding.legalReferences,
   };
 }
@@ -57,13 +70,22 @@ function protectionIssue(protection: Protection): NegotiationIssue {
     clauseQuote: null,
     suggestedText: protection.suggestedText ?? null,
     facts: [],
+    flaggedBecause: [protection.status === "MISSING" ? "הגנה שחסרה בחוזה" : "הגנה שהחוזה נותן רק בחלקה"],
+    explanation: null,
+    recommendedAction: null,
+    relevantPreferences: [],
     legalReferences: protection.legalReferences,
   };
 }
 
-export function negotiationIssues(analysis: AnalysisRecord): NegotiationIssue[] {
+// `relevantPreferences` describes the tenant's preferences that bear on a finding (see
+// negotiation-context.ts); the analysis alone knows none.
+export function negotiationIssues(
+  analysis: AnalysisRecord,
+  relevantPreferences: (finding: Finding) => string[] = () => [],
+): NegotiationIssue[] {
   const issues = [
-    ...analysis.findings.filter((finding) => finding.severity !== "OK").map(findingIssue),
+    ...analysis.findings.filter((finding) => finding.severity !== "OK").map((finding) => findingIssue(finding, relevantPreferences)),
     ...analysis.missingProtections.filter((item) => item.status !== "COVERED").map(protectionIssue),
   ];
   return issues.sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]);
@@ -98,15 +120,26 @@ function issueTexts(issue: NegotiationIssue) {
     issue.contractSection,
     issue.clauseQuote,
     issue.suggestedText,
+    issue.explanation,
+    issue.recommendedAction,
     ...issue.facts,
+    ...issue.flaggedBecause,
+    ...issue.relevantPreferences,
     ...issue.legalReferences.flatMap((reference) => [reference.lawName, reference.section, reference.excerpt]),
   ].filter((text): text is string => Boolean(text));
 }
 
-// Every number the agent may use: those in the analysis and law excerpts, and those the tenant said.
-export function groundedNumbers(record: Pick<NegotiationRecord, "issues" | "messages">) {
+// What numbers may be checked against. `context` is absent only in narrow unit tests.
+type GroundingSource = Pick<NegotiationRecord, "issues" | "messages"> & Partial<Pick<NegotiationRecord, "context">>;
+
+// Every number the agent may use: those in the analysis, the law excerpts, the contract and its
+// terms, the tenant's preferences, and what the tenant said.
+export function groundedNumbers(record: GroundingSource) {
   const texts = [
     ...record.issues.flatMap(issueTexts),
+    ...(record.context?.preferences ?? []),
+    ...(record.context?.contractTerms ?? []),
+    ...(record.context?.clauses ?? []).flatMap((clause) => [clause.header ?? "", clause.text]),
     ...record.messages.filter((message) => message.role === "TENANT").map((message) => message.text),
   ];
   return new Set(texts.flatMap(numbersIn));
@@ -142,7 +175,7 @@ function mentionMatches(mention: string, lawSections: string[], contractSections
 export type GroundingProblem = { message: string; warning: string };
 
 function textProblems(
-  record: Pick<NegotiationRecord, "issues" | "messages">,
+  record: GroundingSource,
   text: string,
   lawSections: string[],
   contractSections: string[],
@@ -188,7 +221,7 @@ function includedIssues(record: Pick<NegotiationRecord, "issues" | "priorities" 
 
 // Checks a draft written by the agent. Any problem rejects it, and the model is asked to fix it.
 export function agentDraftProblems(
-  record: Pick<NegotiationRecord, "issues" | "messages" | "priorities" | "strategies">,
+  record: GroundingSource & Pick<NegotiationRecord, "priorities" | "strategies">,
   draft: Pick<NegotiationDraft, "text" | "requests">,
 ): string[] {
   const problems: string[] = [];
@@ -244,7 +277,7 @@ export function agentDraftProblems(
 // Checks a tenant's own edit. The tenant decides what to send, so problems are only shown as
 // warnings next to the message.
 export function tenantDraftWarnings(
-  record: Pick<NegotiationRecord, "issues" | "messages" | "priorities" | "strategies">,
+  record: GroundingSource & Pick<NegotiationRecord, "priorities" | "strategies">,
   text: string,
 ) {
   const included = includedIssues(record);
@@ -257,7 +290,7 @@ export function tenantDraftWarnings(
 }
 
 export function strategyProblems(
-  record: Pick<NegotiationRecord, "issues" | "messages" | "priorities">,
+  record: GroundingSource & Pick<NegotiationRecord, "priorities">,
   issueId: string,
   strategy: IssueStrategy,
   concessionConfirmed: boolean,
@@ -294,7 +327,7 @@ const MAX_TENANT_ISSUES = 10;
 // A topic the tenant raised that the analysis did not flag. Its wording comes from the model, so
 // it is held to the same number rule as everything else.
 export function tenantIssueProblems(
-  record: Pick<NegotiationRecord, "issues" | "messages">,
+  record: GroundingSource,
   title: string,
   description: string,
 ): string[] {

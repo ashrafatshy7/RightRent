@@ -75,15 +75,22 @@ export async function redactWithDictaBert(
   texts: string[],
   fetcher: typeof fetch = fetch,
 ): Promise<NerEndpointResponse> {
-  const response = await fetcher(nerUrl("redact"), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(env.piiNerToken ? { "x-ner-token": env.piiNerToken } : {}),
-    },
-    body: JSON.stringify({ texts, minimumConfidence: env.piiNerMinimumConfidence }),
-    signal: AbortSignal.timeout(env.piiNerTimeoutMs),
-  });
+  let response: Response;
+  try {
+    response = await fetcher(nerUrl("redact"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(env.piiNerToken ? { "x-ner-token": env.piiNerToken } : {}),
+      },
+      body: JSON.stringify({ texts, minimumConfidence: env.piiNerMinimumConfidence }),
+      signal: AbortSignal.timeout(env.piiNerTimeoutMs),
+    });
+  } catch (error) {
+    // Not running, refusing connections, or timed out: nothing leaves the server unredacted.
+    const reason = error instanceof Error ? error.name : "network_error";
+    throw new HttpError(503, "PII_NER_UNAVAILABLE", `The local Hebrew NER service could not be reached (${reason}).`);
+  }
   if (!response.ok) {
     await response.body?.cancel();
     throw new HttpError(503, "PII_NER_UNAVAILABLE", `The local Hebrew NER service returned HTTP ${response.status}.`);

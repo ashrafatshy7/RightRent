@@ -55,6 +55,14 @@ test("the DictaBERT client validates and preserves the local redaction response"
   assert.deepEqual(result.items, [{ text: "המשכיר [PERSON_NAME]", entityCount: 1 }]);
 });
 
+test("an unreachable DictaBERT service is reported as unavailable, not as an internal error", async () => {
+  const fetcher = async () => { throw new TypeError("fetch failed"); };
+  await assert.rejects(
+    redactWithDictaBert(["המשכיר ישראל ישראלי"], fetcher as typeof fetch),
+    (error: { status?: number; code?: string }) => error.status === 503 && error.code === "PII_NER_UNAVAILABLE",
+  );
+});
+
 test("every long logical clause is split into chunks no longer than 300 words", () => {
   const lines = Array.from({ length: 70 }, () => "אחת שתיים שלוש ארבע חמש");
   const clauses = extractClausesFromPlainText(["[C001]", ...lines].join("\n"));

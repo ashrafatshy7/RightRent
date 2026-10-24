@@ -19,6 +19,7 @@ import {
   usesClaude,
   type AgentDependencies,
 } from "./negotiation-agent.js";
+import { buildNegotiationContext, preferencesForTopic } from "./negotiation-context.js";
 import { defaultPriorities, negotiationIssues, tenantDraftWarnings } from "./negotiation-grounding.js";
 import { scriptedAgentModel } from "./scripted-agent-model.js";
 
@@ -50,9 +51,9 @@ async function ownedAnalysis(analysisId: string, userId: string) {
   return analysis;
 }
 
-// Records from before the conversational agent cannot be continued; they count as not started.
+// Records from an earlier agent cannot be continued; they count as not started.
 function isCurrent(record: NegotiationRecord | null): record is NegotiationRecord {
-  return record?.agentVersion === 2;
+  return record?.agentVersion === 3;
 }
 
 async function currentNegotiation(analysisId: string, userId: string) {
@@ -74,8 +75,14 @@ function requireState(record: NegotiationRecord, expected: NegotiationRecord["st
   }
 }
 
+async function redactTexts(texts: string[]) {
+  if (!texts.length) return [];
+  const clauses = texts.map((text, index) => ({ id: `NEGOTIATION_TEXT_${index}`, text, locations: [] }));
+  return (await redactClauses(clauses)).clauses.map((clause) => clause.text);
+}
+
 async function redactText(text: string) {
-  return (await redactClauses([{ id: "NEGOTIATION_TEXT", text, locations: [] }])).clauses[0]!.text;
+  return (await redactTexts([text]))[0]!;
 }
 
 function agentMessage(text: string, quickReplies: string[] = []): NegotiationChatMessage {
@@ -175,21 +182,28 @@ export function publicNegotiation(record: NegotiationRecord) {
 
 export type PublicNegotiation = ReturnType<typeof publicNegotiation>;
 
+// null when the tenant has not started one for this analysis.
 export async function getNegotiation(analysisId: string, userId: string) {
-  return publicNegotiation(await currentNegotiation(analysisId, userId));
+  await ownedAnalysis(analysisId, userId);
+  const record = await (await getStore()).getNegotiation(analysisId);
+  return isCurrent(record) && record.userId === userId ? publicNegotiation(record) : null;
 }
 
-function newNegotiation(analysis: AnalysisRecord, userId: string): NegotiationRecord {
-  const issues = negotiationIssues(analysis);
-  if (!issues.length) {
+async function newNegotiation(analysis: AnalysisRecord, userId: string): Promise<NegotiationRecord> {
+  if (!negotiationIssues(analysis).length) {
     throw new HttpError(409, "NO_NEGOTIABLE_FINDINGS", "This analysis contains no issues to negotiate.");
   }
+  const contract = await (await getStore()).getContract(analysis.contractId);
+  const { context, redactedNotes } = await buildNegotiationContext(analysis, contract, redactTexts);
+  const issues = negotiationIssues(analysis, (finding) =>
+    preferencesForTopic(analysis.preferencesSnapshot, redactedNotes, finding.topic));
   const now = new Date().toISOString();
   return {
     id: randomUUID(),
     userId,
     analysisId: analysis.analysisId,
-    agentVersion: 2,
+    agentVersion: 3,
+    context,
     state: "PRIORITIZE",
     addressForm: null,
     issues,
@@ -213,7 +227,7 @@ export async function startNegotiation(analysisId: string, userId: string, resta
     const store = await getStore();
     const existing = await store.getNegotiation(analysisId);
     if (!restart && isCurrent(existing) && existing.userId === userId) return publicNegotiation(existing);
-    const record = newNegotiation(analysis, userId);
+    const record = await newNegotiation(analysis, userId);
     await store.upsertNegotiation(record);
     return publicNegotiation(record);
   });

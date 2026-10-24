@@ -100,15 +100,8 @@ export function NegotiationPage() {
   const queryKey = ["negotiation", analysisId];
   const query = useQuery({
     queryKey,
-    // A negotiation that was never started is a state of the page, not an error.
-    queryFn: async () => {
-      try {
-        return (await api.getNegotiation(token!, analysisId)).negotiation;
-      } catch (error) {
-        if (error instanceof ApiError && error.code === "NEGOTIATION_NOT_FOUND") return null;
-        throw error;
-      }
-    },
+    // null: the tenant has not started a negotiation for this analysis yet.
+    queryFn: async () => (await api.getNegotiation(token!, analysisId)).negotiation,
     enabled: Boolean(token && analysisId),
   });
   const negotiation = query.data ?? null;

@@ -391,6 +391,13 @@ export type NegotiationIssue = {
   suggestedText: string | null;
   // Values computed in code from the contract and the law (deterministic checks), stated in Hebrew.
   facts: string[];
+  // Why the analysis flagged it, in Hebrew ("סותר את החוק", "מתנגש עם ההעדפות שלך", ...).
+  flaggedBecause: string[];
+  // The analysis' full legal reasoning and its recommended next step.
+  explanation: string | null;
+  recommendedAction: string | null;
+  // The tenant's preferences that bear on this subject, as Hebrew lines.
+  relevantPreferences: string[];
   legalReferences: LegalReference[];
 };
 
@@ -425,12 +432,22 @@ export type NegotiationChatMessage = {
   createdAt: string;
 };
 
+// What the agent knows besides the issues (see negotiations/negotiation-context.ts): Hebrew lines
+// describing the tenant's preferences and the contract's terms, and the redacted contract text.
+export type NegotiationContext = {
+  preferences: string[];
+  contractTerms: string[];
+  clauses: Array<{ clauseId: string; header: string | null; text: string }>;
+};
+
 export type NegotiationRecord = {
   id: string;
   userId: string;
   analysisId: string;
-  // Records written before the conversational agent have no version and are started over.
-  agentVersion: 2;
+  // Records from an earlier agent (no version, or version 2 without the contract context) are
+  // started over.
+  agentVersion: 3;
+  context: NegotiationContext;
   state: NegotiationState;
   addressForm: AddressForm | null;
   issues: NegotiationIssue[];

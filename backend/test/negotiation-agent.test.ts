@@ -11,8 +11,10 @@ import {
   type AgentDependencies,
   type AgentModel,
 } from "../src/modules/negotiations/negotiation-agent.js";
+import { contractTermLines, preferenceLines } from "../src/modules/negotiations/negotiation-context.js";
 import {
   agentDraftProblems,
+  groundedNumbers,
   numbersIn,
   tenantDraftWarnings,
 } from "../src/modules/negotiations/negotiation-grounding.js";
@@ -28,6 +30,10 @@ const guarantee: NegotiationIssue = {
   clauseQuote: "The tenant shall provide a bank guarantee of ILS 30000.",
   suggestedText: "השוכר ימסור ערבות בסך 18,000 ₪.",
   facts: ["ערבות: בחוזה 30,000 ₪, המקסימום לפי החוק 18,000 ₪ - חורג מהמותר בחוק."],
+  flaggedBecause: ["סותר את החוק"],
+  explanation: null,
+  recommendedAction: null,
+  relevantPreferences: [],
   legalReferences: [{
     lawReferenceId: "law-25i",
     lawName: "חוק השכירות והשאילה",
@@ -50,6 +56,10 @@ const pets: NegotiationIssue = {
   clauseQuote: null,
   suggestedText: "יותר להחזיק חתול אחד.",
   facts: [],
+  flaggedBecause: ["מתנגש עם ההעדפות של השוכר"],
+  explanation: null,
+  recommendedAction: null,
+  relevantPreferences: ["חיית מחמד: חייב שהחוזה יאפשר"],
   legalReferences: [],
 };
 
@@ -58,7 +68,8 @@ function record(overrides: Partial<NegotiationRecord> = {}): NegotiationRecord {
     id: "n1",
     userId: "u1",
     analysisId: "a1",
-    agentVersion: 2,
+    agentVersion: 3,
+    context: { preferences: [], contractTerms: [], clauses: [] },
     state: "PRIORITIZE",
     addressForm: null,
     issues: [guarantee, pets],
@@ -302,4 +313,48 @@ test("the draft must carry the tenant's own figures, not the analysis' suggestio
   assert.ok(problems.some((problem) => /drops the figure\(s\) 2 .*C005/u.test(problem)));
   const faithful = { ...validDraft, text: validDraft.text.replace("להחזיק חתול אחד", "להחזיק עד 2 חתולים") };
   assert.deepEqual(agentDraftProblems(ownAsk, faithful), []);
+});
+
+test("the agent reads the tenant's preferences and the contract terms with their meaning", () => {
+  const preferences = preferenceLines({
+    maxMonthlyRentIls: 3500,
+    repairUrgencyHours: 48,
+    leaseLengthMonths: 12,
+    maxAnnualRentIncreasePercent: 3,
+    petsRequired: true,
+    furnishedRequired: false,
+    acceptedSecurityKinds: ["BANK_GUARANTEE"],
+    maxMonthlyTotalCostIls: null,
+    acceptsIndexation: false,
+    earlyExitRequired: true,
+    roommatesRequired: false,
+    renewalOptionRequired: false,
+    minEntryNoticeHours: 24,
+    acceptsBrokerFee: false,
+    additionalNotes: "",
+  }, "");
+  assert.ok(preferences.includes("תקציב מקסימלי לשכר דירה חודשי: 3,500 ₪"));
+  assert.ok(preferences.some((line) => line.includes("חיית מחמד: חייב")));
+
+  const terms = contractTermLines({
+    monthlyRent: { value: 4200, clauseId: "C003", quote: "4,200", verified: false, origin: "MODEL" },
+    leaseTermMonths: { value: 12, clauseId: "C002", quote: "12", verified: true, origin: "RULE" },
+    leaseStart: null,
+    indexation: null,
+    annualIncreasePercent: null,
+    option: { months: null, rent: null, increasePercent: null },
+    charges: [],
+    oneTimeCosts: [],
+    securities: [],
+    lateVacating: null,
+    latePayment: null,
+    earlyExit: null,
+    unknowns: [],
+  }, { leaseTermMonths: 24 });
+  assert.ok(terms.some((line) => line.startsWith("שכר דירה חודשי: 4,200 ₪") && line.includes("לא אומת")));
+  assert.ok(terms.some((line) => line.startsWith("תקופת השכירות: 24 חודשים") && line.includes("כפי שהשוכר אישר")));
+
+  // Numbers the tenant set or the contract states may appear in the message without being said again.
+  const grounded = groundedNumbers({ ...record(), context: { preferences, contractTerms: terms, clauses: [] } });
+  assert.ok(grounded.has(3500) && grounded.has(4200));
 });
