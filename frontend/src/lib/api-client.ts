@@ -11,6 +11,8 @@ import type {
   FinancialOverrides,
   LawApproval,
   LawSourceState,
+  Negotiation,
+  NegotiationAction,
   PublicUser,
   Readiness,
   TenantPreferences,
@@ -126,6 +128,50 @@ async function analyzeWithConsoleProgress(token: string, contractId: string, pre
   throw new ApiError(502, "ANALYSIS_STREAM_ENDED", "הניתוח נקטע לפני שהסתיים. נסו שוב.");
 }
 
+type NegotiationStreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "negotiation"; negotiation: Negotiation }
+  | { type: "result"; negotiation: Negotiation }
+  | { type: "error"; status: number; error: { code?: string; message?: string } };
+
+// Sends one tenant message to the negotiation agent. The reply streams back one JSON event per line:
+// text as the agent writes it, and the negotiation whenever the agent changes it.
+async function sendNegotiationMessage(
+  token: string,
+  analysisId: string,
+  text: string,
+  handlers: { onText: (delta: string) => void; onNegotiation: (negotiation: Negotiation) => void },
+): Promise<Negotiation> {
+  const response = await fetch(`${API_BASE_URL}${API_PATHS.negotiationMessages(analysisId)}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: PROGRESS_STREAM_TYPE },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => ({})) as ApiErrorBody;
+    throw new ApiError(response.status, body.error?.code ?? "REQUEST_FAILED", body.error?.message ?? "הבקשה נכשלה. נסו שוב.");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffered += decoder.decode(value, { stream: !done });
+    const lines = buffered.split("\n");
+    buffered = done ? "" : lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as NegotiationStreamEvent;
+      if (event.type === "text") handlers.onText(event.delta);
+      else if (event.type === "negotiation") handlers.onNegotiation(event.negotiation);
+      else if (event.type === "result") return event.negotiation;
+      else throw new ApiError(event.status, event.error.code ?? "REQUEST_FAILED", event.error.message ?? "הבקשה נכשלה. נסו שוב.");
+    }
+    if (done) break;
+  }
+  throw new ApiError(502, "NEGOTIATION_STREAM_ENDED", "התשובה נקטעה לפני שהסתיימה. נסו שוב.");
+}
+
 export const api = Object.freeze({
   register: (email: string, password: string) => request<AuthResponse>(API_PATHS.register, {
     method: "POST",
@@ -166,6 +212,13 @@ export const api = Object.freeze({
     { method: "PUT", body: JSON.stringify(overrides) },
     token,
   ),
+  getNegotiation: (token: string, analysisId: string) => request<{ negotiation: Negotiation | null }>(API_PATHS.negotiation(analysisId), {}, token),
+  negotiationAction: (token: string, analysisId: string, action: NegotiationAction) => request<{ negotiation: Negotiation }>(
+    API_PATHS.negotiation(analysisId),
+    { method: "POST", body: JSON.stringify(action) },
+    token,
+  ),
+  sendNegotiationMessage,
   deleteHistory: (token: string, analysisId: string) => request<void>(API_PATHS.historyItem(analysisId), { method: "DELETE" }, token),
   getReadiness: () => request<Readiness>(API_PATHS.readiness, {}, undefined, [503]),
   getLawStatus: (token: string) => request<{ laws: LawSourceState[] }>(API_PATHS.adminLawStatus, {}, token),

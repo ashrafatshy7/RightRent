@@ -371,16 +371,98 @@ export type AnalysisRecord = AnalysisResult & {
 
 export type NegotiationState = "PRIORITIZE" | "STRATEGY" | "DRAFT" | "COUNTER" | "DONE";
 export type NegotiationStrategy = "CITE_LAW" | "PROPOSE_ALTERNATIVE" | "CONCEDE";
+// How the agent addresses the tenant and how the tenant speaks in the drafted message - Hebrew
+// verbs and adjectives agree with it ("אני מבקש" / "אני מבקשת").
+export type AddressForm = "MASCULINE" | "FEMININE" | "PLURAL";
+
+// Something the tenant can raise with the landlord: a flagged clause, a protection the contract
+// leaves out (both snapshotted from the analysis when the negotiation starts), or a request the
+// tenant brought up themselves during the conversation.
+export type NegotiationIssue = {
+  issueId: string;
+  kind: "CLAUSE" | "MISSING_PROTECTION" | "TENANT_REQUEST";
+  severity: "RED" | "ORANGE" | "SUGGESTION" | "TENANT";
+  title: string;
+  summary: string;
+  whyItMatters: string | null;
+  // The clause's own numbering in the contract ("סעיף 7"), when it has one.
+  contractSection: string | null;
+  clauseQuote: string | null;
+  suggestedText: string | null;
+  // Values computed in code from the contract and the law (deterministic checks), stated in Hebrew.
+  facts: string[];
+  // Why the analysis flagged it, in Hebrew ("סותר את החוק", "מתנגש עם ההעדפות שלך", ...).
+  flaggedBecause: string[];
+  // The analysis' full legal reasoning and its recommended next step.
+  explanation: string | null;
+  recommendedAction: string | null;
+  // The tenant's preferences that bear on this subject, as Hebrew lines.
+  relevantPreferences: string[];
+  legalReferences: LegalReference[];
+};
+
+export type IssueStrategy = {
+  kind: NegotiationStrategy;
+  // The concrete ask, in Hebrew, as agreed with the tenant (null when the tenant concedes).
+  request: string | null;
+  // The least the tenant would still accept, when they named one.
+  fallback: string | null;
+};
+
+export type NegotiationDraft = {
+  text: string;
+  // Which issues the message raises and which of their legal references it relies on.
+  requests: Array<{ issueId: string; lawReferenceIds: string[] }>;
+  editedByTenant: boolean;
+  // Problems the deterministic checks found in a tenant's own edit (an agent draft has none).
+  warnings: string[];
+};
+
+export type LikelyReply = {
+  issueId: string | null;
+  landlordReply: string;
+  suggestedResponse: string;
+};
+
+export type NegotiationChatMessage = {
+  id: string;
+  role: "AGENT" | "TENANT";
+  text: string;
+  quickReplies: string[];
+  createdAt: string;
+};
+
+// What the agent knows besides the issues (see negotiations/negotiation-context.ts): Hebrew lines
+// describing the tenant's preferences and the contract's terms, and the redacted contract text.
+export type NegotiationContext = {
+  preferences: string[];
+  contractTerms: string[];
+  clauses: Array<{ clauseId: string; header: string | null; text: string }>;
+};
 
 export type NegotiationRecord = {
   id: string;
   userId: string;
   analysisId: string;
+  // Records from an earlier agent (no version, or version 2 without the contract context) are
+  // started over.
+  agentVersion: 3;
+  context: NegotiationContext;
   state: NegotiationState;
+  addressForm: AddressForm | null;
+  issues: NegotiationIssue[];
   priorities: string[];
-  strategies: Record<string, NegotiationStrategy>;
-  draft: string | null;
-  likelyReplies: string[];
+  strategies: Record<string, IssueStrategy>;
+  draft: NegotiationDraft | null;
+  likelyReplies: LikelyReply[];
+  // What the tenant sees, unredacted.
+  messages: NegotiationChatMessage[];
+  // What the model sees: Anthropic message params with tenant text already redacted, kept so the
+  // conversation continues with its tool calls and thinking blocks intact.
+  modelMessages: unknown[];
+  // Results owed for tool calls that ended the previous turn; sent first in the next user message.
+  pendingToolResults: unknown[];
+  tenantTurns: number;
   createdAt: string;
   updatedAt: string;
 };

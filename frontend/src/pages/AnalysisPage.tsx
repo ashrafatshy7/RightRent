@@ -11,6 +11,7 @@ import {
   ExternalLink,
   GitMerge,
   Link2,
+  MessageCircle,
   FileCheck2,
   FileText,
   ScanSearch,
@@ -218,6 +219,9 @@ export function AnalysisPage() {
         description={`הושלם ${formatDate(analysis.createdAt)} · ${formatDuration(analysis.timingMs.total)}`}
         actions={(
           <div className="header-actions">
+            {analysis.summary.critical + analysis.summary.warnings + incompleteProtections > 0 ? (
+              <Link className="primary-button" to={ROUTES.negotiation(analysis.analysisId)}><MessageCircle size={17} /> הכנת הודעה למשכיר</Link>
+            ) : null}
             {previousVersion ? <Link className="secondary-button" to={ROUTES.compare(previousVersion.analysisId, analysis.analysisId)}><GitCompareArrows size={17} /> מה השתנה מהגרסה הקודמת</Link> : null}
             <Link className="secondary-button" to={ROUTES.uploadVersion(analysis.contractId, analysis.analysisId)}><FilePlus2 size={17} /> הגיעה גרסה חדשה מהמשכיר</Link>
             {analysis.markedPdf ? <button className="secondary-button" type="button" onClick={openMarkedPdf}><Download size={17} /> PDF מסומן</button> : null}

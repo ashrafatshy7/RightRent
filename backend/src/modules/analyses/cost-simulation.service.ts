@@ -90,7 +90,7 @@ export type CostSimulation = {
   scenario: CostScenario;
 };
 
-const CHARGE_LABELS: Record<ChargeKind, string> = {
+export const CHARGE_LABELS: Record<ChargeKind, string> = {
   ARNONA: "ארנונה",
   WATER: "מים",
   ELECTRICITY: "חשמל",
@@ -102,7 +102,7 @@ const CHARGE_LABELS: Record<ChargeKind, string> = {
   OTHER: "תשלום שוטף אחר",
 };
 
-const ONE_TIME_LABELS: Record<OneTimeCostKind, string> = {
+export const ONE_TIME_LABELS: Record<OneTimeCostKind, string> = {
   BROKER_FEE: "דמי תיווך",
   LEGAL_FEE: "שכר טרחת עורך דין",
   CLEANING: "ניקיון בסיום",
@@ -203,7 +203,7 @@ function sources(...ids: Array<string | null | undefined>) {
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
-const EXIT_LABELS: Record<EarlyExitKind, string> = {
+export const EXIT_LABELS: Record<EarlyExitKind, string> = {
   UNTIL_END: "תשלום עד סוף התקופה",
   UNTIL_REPLACEMENT: "תשלום עד שיימצא שוכר חלופי",
   FIXED_MONTHS: "פיצוי של מספר חודשי שכירות",

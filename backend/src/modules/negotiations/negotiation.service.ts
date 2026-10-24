@@ -1,70 +1,68 @@
 import { randomUUID } from "node:crypto";
-import { env } from "../../config/env.js";
 import type {
   AnalysisRecord,
-  Finding,
+  NegotiationChatMessage,
+  NegotiationIssue,
   NegotiationRecord,
-  NegotiationStrategy,
 } from "../../domain/models.js";
 import { getStore } from "../../shared/data/store.js";
 import { HttpError } from "../../shared/http/http-error.js";
-import { generateLikelyLandlordReplies, generateNegotiationDraft } from "../analyses/ai-providers.js";
 import { redactClauses } from "../analyses/anonymization.service.js";
+import { prepareLikelyReplies } from "./likely-replies.js";
+import {
+  claudeAgentModel,
+  currentIssueId,
+  finalizeDraft,
+  moveTo,
+  runAgentTurn,
+  tenantTurnContent,
+  usesClaude,
+  type AgentDependencies,
+} from "./negotiation-agent.js";
+import { buildNegotiationContext, preferencesForTopic } from "./negotiation-context.js";
+import { defaultPriorities, negotiationIssues, tenantDraftWarnings } from "./negotiation-grounding.js";
+import { scriptedAgentModel } from "./scripted-agent-model.js";
 
-type NegotiationAction =
-  | { action: "START" }
-  | { action: "SET_PRIORITIES"; clauseIds: string[] }
-  | { action: "CHOOSE_STRATEGY"; clauseId: string; strategy: NegotiationStrategy }
-  | { action: "SAVE_DRAFT"; draft: string }
-  | { action: "COMPLETE" };
+// The service never contacts a landlord and never sends a message: it prepares text the tenant
+// reviews, edits, and sends themselves.
 
-function negotiableFindings(analysis: AnalysisRecord) {
-  return analysis.findings.filter((finding) => finding.severity !== "OK");
-}
+const MAX_TENANT_TURNS = 60;
 
-function findingById(analysis: AnalysisRecord, clauseId: string) {
-  const finding = negotiableFindings(analysis).find((item) => item.clauseId === clauseId);
-  if (!finding) throw new HttpError(400, "UNKNOWN_NEGOTIATION_ISSUE", `No negotiable finding matches ${clauseId}.`);
-  return finding;
-}
+// One turn at a time per negotiation, so two tabs cannot interleave tool calls.
+const busy = new Set<string>();
 
-function issueSentence(finding: Finding, strategy: NegotiationStrategy) {
-  if (strategy === "CONCEDE") return null;
-  const reference = finding.legalReferences[0];
-  if (strategy === "CITE_LAW" && reference) {
-    return `בנוגע ל${finding.title}, אבקש לתקן את הסעיף בהתאם לסעיף ${reference.section ?? reference.lawReferenceId} לחוק.`;
+async function exclusively<T>(analysisId: string, work: () => Promise<T>) {
+  if (busy.has(analysisId)) {
+    throw new HttpError(409, "NEGOTIATION_BUSY", "The negotiation is still answering the previous message.");
   }
-  return `בנוגע ל${finding.title}, אבקש שנמצא נוסח חלופי מאוזן שמגן על שני הצדדים.`;
+  busy.add(analysisId);
+  try {
+    return await work();
+  } finally {
+    busy.delete(analysisId);
+  }
 }
 
-function draftMessage(analysis: AnalysisRecord, negotiation: NegotiationRecord) {
-  const requests = negotiation.priorities
-    .map((clauseId) => issueSentence(findingById(analysis, clauseId), negotiation.strategies[clauseId]!))
-    .filter((sentence): sentence is string => Boolean(sentence));
-  return [
-    "שלום, תודה על שליחת חוזה השכירות.",
-    "עברתי עליו ואשמח להסכים על כמה התאמות לפני החתימה:",
-    ...requests.map((request, index) => `${index + 1}. ${request}`),
-    "אשמח לדבר ולמצוא פתרון הוגן ונוח לשנינו. תודה!",
-  ].join("\n");
+async function ownedAnalysis(analysisId: string, userId: string) {
+  const analysis = await (await getStore()).getAnalysis(analysisId);
+  if (!analysis || analysis.userId !== userId) {
+    throw new HttpError(404, "ANALYSIS_NOT_FOUND", "The analysis was not found.");
+  }
+  return analysis;
 }
 
-function publicNegotiation(record: NegotiationRecord, analysis: AnalysisRecord) {
-  const currentClauseId = record.state === "STRATEGY"
-    ? record.priorities.find((id) => !record.strategies[id]) ?? null
-    : null;
-  return {
-    id: record.id,
-    analysisId: record.analysisId,
-    state: record.state,
-    priorities: record.priorities,
-    strategies: record.strategies,
-    draft: record.draft,
-    likelyReplies: record.likelyReplies,
-    currentIssue: currentClauseId ? findingById(analysis, currentClauseId) : null,
-    strategyOptions: currentClauseId ? ["CITE_LAW", "PROPOSE_ALTERNATIVE", "CONCEDE"] : [],
-    updatedAt: record.updatedAt,
-  };
+// Records from an earlier agent cannot be continued; they count as not started.
+function isCurrent(record: NegotiationRecord | null): record is NegotiationRecord {
+  return record?.agentVersion === 3;
+}
+
+async function currentNegotiation(analysisId: string, userId: string) {
+  await ownedAnalysis(analysisId, userId);
+  const record = await (await getStore()).getNegotiation(analysisId);
+  if (!isCurrent(record) || record.userId !== userId) {
+    throw new HttpError(404, "NEGOTIATION_NOT_FOUND", "The negotiation was not started.");
+  }
+  return record;
 }
 
 function requireState(record: NegotiationRecord, expected: NegotiationRecord["state"]) {
@@ -77,100 +75,265 @@ function requireState(record: NegotiationRecord, expected: NegotiationRecord["st
   }
 }
 
-export async function getNegotiation(analysisId: string, userId: string) {
-  const store = await getStore();
-  const analysis = await store.getAnalysis(analysisId);
-  if (!analysis || analysis.userId !== userId) {
-    throw new HttpError(404, "ANALYSIS_NOT_FOUND", "The analysis was not found.");
-  }
-  const negotiation = await store.getNegotiation(analysisId);
-  if (!negotiation) throw new HttpError(404, "NEGOTIATION_NOT_FOUND", "The negotiation was not started.");
-  return publicNegotiation(negotiation, analysis);
+async function redactTexts(texts: string[]) {
+  if (!texts.length) return [];
+  const clauses = texts.map((text, index) => ({ id: `NEGOTIATION_TEXT_${index}`, text, locations: [] }));
+  return (await redactClauses(clauses)).clauses.map((clause) => clause.text);
 }
 
-export async function advanceNegotiation(analysisId: string, userId: string, action: NegotiationAction) {
-  const store = await getStore();
-  const analysis = await store.getAnalysis(analysisId);
-  if (!analysis || analysis.userId !== userId) {
-    throw new HttpError(404, "ANALYSIS_NOT_FOUND", "The analysis was not found.");
-  }
-  const findings = negotiableFindings(analysis);
-  if (!findings.length) {
-    throw new HttpError(409, "NO_NEGOTIABLE_FINDINGS", "This analysis contains no critical issues or warnings.");
-  }
+async function redactText(text: string) {
+  return (await redactTexts([text]))[0]!;
+}
 
-  let negotiation = await store.getNegotiation(analysisId);
+function agentMessage(text: string, quickReplies: string[] = []): NegotiationChatMessage {
+  return { id: randomUUID(), role: "AGENT", text, quickReplies, createdAt: new Date().toISOString() };
+}
+
+function countPhrase(count: number, one: string, many: (count: number) => string) {
+  return count === 1 ? one : many(count);
+}
+
+// The opening is fixed text: it is instant, costs nothing, and its numbers come straight from the
+// analysis. The model receives it with the tenant's first answer.
+function openingMessage(issues: NegotiationIssue[]) {
+  const red = issues.filter((issue) => issue.severity === "RED").length;
+  const orange = issues.filter((issue) => issue.severity === "ORANGE").length;
+  const missing = issues.filter((issue) => issue.severity === "SUGGESTION").length;
+  const found = [
+    red ? countPhrase(red, "סעיף אחד שעלול לסתור את החוק", (count) => `${count} סעיפים שעלולים לסתור את החוק`) : null,
+    orange ? countPhrase(orange, "סעיף אחד שכדאי לשפר", (count) => `${count} סעיפים שכדאי לשפר`) : null,
+    missing ? countPhrase(missing, "הגנה אחת שחסרה בחוזה", (count) => `${count} הגנות שחסרות בחוזה`) : null,
+  ].filter((part): part is string => Boolean(part));
+  // Hebrew writes "and" as a prefix, with a maqaf before a digit ("ו־6").
+  const and = (part: string) => (/^\d/u.test(part) ? `ו־${part}` : `ו${part}`);
+  const listed = found.length > 1 ? `${found.slice(0, -1).join(", ")} ${and(found.at(-1)!)}` : found[0];
+  return agentMessage([
+    "שלום! אני הסוכן של RightRent, ואעזור לכם להכין את השיחה עם המשכיר.",
+    `בניתוח החוזה מצאתי ${listed}.`,
+    "נעבור על זה יחד: נקבע מה הכי חשוב לכם, נבחר איך לגשת לכל נושא, ובסוף אנסח הודעת WhatsApp אחת למשכיר. את ההודעה אתם בודקים, עורכים ושולחים בעצמכם - אני לא פונה למשכיר.",
+    "לפני שנתחיל: איך לפנות אליך?",
+  ].join("\n"), ["בלשון זכר", "בלשון נקבה", "בלשון רבים"]);
+}
+
+function dependencies(record: NegotiationRecord): AgentDependencies {
+  return {
+    proposedPriorities: defaultPriorities(record.issues),
+    prepareLikelyReplies: async (current) => {
+      const draft = current.draft!;
+      // An agent draft is built only from redacted material; a tenant's own edit is not.
+      const safeDraft = draft.editedByTenant ? await redactText(draft.text) : draft.text;
+      return prepareLikelyReplies(current, safeDraft, usesClaude());
+    },
+  };
+}
+
+export function publicNegotiation(record: NegotiationRecord) {
+  const issue = (issueId: string) => record.issues.find((item) => item.issueId === issueId);
+  return {
+    id: record.id,
+    analysisId: record.analysisId,
+    state: record.state,
+    addressForm: record.addressForm,
+    issues: record.issues.map(({ issueId, kind, severity, title, summary, legalReferences }) => ({
+      issueId,
+      kind,
+      severity,
+      title,
+      summary,
+      legalReferences: legalReferences.map(({ lawReferenceId, lawName, section, sourceUrl }) => ({
+        lawReferenceId,
+        lawName,
+        section,
+        sourceUrl,
+      })),
+    })),
+    priorities: record.priorities,
+    strategies: record.strategies,
+    currentIssueId: currentIssueId(record),
+    draft: record.draft
+      ? {
+          text: record.draft.text,
+          editedByTenant: record.draft.editedByTenant,
+          warnings: record.draft.warnings,
+          // The legal sources behind the message, for the tenant to check before sending.
+          sources: record.draft.requests.flatMap(({ issueId, lawReferenceIds }) => {
+            const raised = issue(issueId);
+            const references = (raised?.legalReferences ?? [])
+              .filter((reference) => lawReferenceIds.includes(reference.lawReferenceId))
+              .map(({ lawReferenceId, lawName, section, sourceUrl, excerpt }) => ({
+                lawReferenceId,
+                lawName,
+                section,
+                sourceUrl,
+                excerpt,
+              }));
+            return raised && references.length ? [{ issueId, title: raised.title, references }] : [];
+          }),
+        }
+      : null,
+    likelyReplies: record.likelyReplies,
+    messages: record.messages,
+    turnsLeft: Math.max(0, MAX_TENANT_TURNS - record.tenantTurns),
+    // SCRIPTED is the offline stand-in (no Claude); the page says so instead of passing it off as the agent.
+    agentMode: usesClaude() ? "CLAUDE" as const : "SCRIPTED" as const,
+    updatedAt: record.updatedAt,
+  };
+}
+
+export type PublicNegotiation = ReturnType<typeof publicNegotiation>;
+
+// null when the tenant has not started one for this analysis.
+export async function getNegotiation(analysisId: string, userId: string) {
+  await ownedAnalysis(analysisId, userId);
+  const record = await (await getStore()).getNegotiation(analysisId);
+  return isCurrent(record) && record.userId === userId ? publicNegotiation(record) : null;
+}
+
+async function newNegotiation(analysis: AnalysisRecord, userId: string): Promise<NegotiationRecord> {
+  if (!negotiationIssues(analysis).length) {
+    throw new HttpError(409, "NO_NEGOTIABLE_FINDINGS", "This analysis contains no issues to negotiate.");
+  }
+  const contract = await (await getStore()).getContract(analysis.contractId);
+  const { context, redactedNotes } = await buildNegotiationContext(analysis, contract, redactTexts);
+  const issues = negotiationIssues(analysis, (finding) =>
+    preferencesForTopic(analysis.preferencesSnapshot, redactedNotes, finding.topic));
   const now = new Date().toISOString();
-  if (action.action === "START") {
-    negotiation ??= {
-      id: randomUUID(),
-      userId,
-      analysisId,
-      state: "PRIORITIZE",
-      priorities: [...findings]
-        .sort((left, right) => ({ RED: 0, ORANGE: 1, OK: 2 })[left.severity] - ({ RED: 0, ORANGE: 1, OK: 2 })[right.severity])
-        .map((finding) => finding.clauseId),
-      strategies: {},
-      draft: null,
-      likelyReplies: [],
-      createdAt: now,
-      updatedAt: now,
+  return {
+    id: randomUUID(),
+    userId,
+    analysisId: analysis.analysisId,
+    agentVersion: 3,
+    context,
+    state: "PRIORITIZE",
+    addressForm: null,
+    issues,
+    priorities: [],
+    strategies: {},
+    draft: null,
+    likelyReplies: [],
+    messages: [openingMessage(issues)],
+    modelMessages: [],
+    pendingToolResults: [],
+    tenantTurns: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// Returns the existing conversation, or starts one. `restart` throws the old one away.
+export async function startNegotiation(analysisId: string, userId: string, restart: boolean) {
+  return exclusively(analysisId, async () => {
+    const analysis = await ownedAnalysis(analysisId, userId);
+    const store = await getStore();
+    const existing = await store.getNegotiation(analysisId);
+    if (!restart && isCurrent(existing) && existing.userId === userId) return publicNegotiation(existing);
+    const record = await newNegotiation(analysis, userId);
+    await store.upsertNegotiation(record);
+    return publicNegotiation(record);
+  });
+}
+
+export type NegotiationStreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "negotiation"; negotiation: PublicNegotiation };
+
+export async function sendTenantMessage(
+  analysisId: string,
+  userId: string,
+  text: string,
+  emit: (event: NegotiationStreamEvent) => void,
+) {
+  return exclusively(analysisId, async () => {
+    const record = await currentNegotiation(analysisId, userId);
+    if (record.state === "DONE") {
+      throw new HttpError(409, "NEGOTIATION_DONE", "The negotiation is complete. Start over to prepare a new message.");
+    }
+    if (record.tenantTurns >= MAX_TENANT_TURNS) {
+      throw new HttpError(429, "NEGOTIATION_TURN_LIMIT", "This negotiation reached its message limit. Start over to continue.");
+    }
+
+    // Personal details are removed locally before anything reaches the model; the tenant still
+    // sees what they wrote.
+    const redactedText = await redactText(text);
+    const redactedDraftEdit = record.draft?.editedByTenant ? await redactText(record.draft.text) : null;
+    const withTenantMessage: NegotiationRecord = {
+      ...record,
+      messages: [...record.messages, {
+        id: randomUUID(),
+        role: "TENANT",
+        text,
+        quickReplies: [],
+        createdAt: new Date().toISOString(),
+      }],
+      tenantTurns: record.tenantTurns + 1,
     };
-    await store.upsertNegotiation(negotiation);
-    return publicNegotiation(negotiation, analysis);
-  }
+    const agentDependencies = dependencies(record);
+    const content = tenantTurnContent(
+      withTenantMessage,
+      redactedText,
+      redactedDraftEdit,
+      agentDependencies.proposedPriorities,
+      record.modelMessages.length ? null : record.messages[0]?.text ?? null,
+    );
+    const answered = await runAgentTurn(
+      withTenantMessage,
+      content,
+      usesClaude() ? claudeAgentModel : scriptedAgentModel,
+      agentDependencies,
+      (event) => emit(event.type === "text" ? event : { type: "negotiation", negotiation: publicNegotiation(event.record) }),
+    );
+    const saved = { ...answered, updatedAt: new Date().toISOString() };
+    await (await getStore()).upsertNegotiation(saved);
+    return publicNegotiation(saved);
+  });
+}
 
-  if (!negotiation) {
-    throw new HttpError(409, "NEGOTIATION_NOT_STARTED", "Start the negotiation before advancing it.");
-  }
-
-  if (action.action === "SET_PRIORITIES") {
-    requireState(negotiation, "PRIORITIZE");
-    if (new Set(action.clauseIds).size !== action.clauseIds.length) {
-      throw new HttpError(400, "DUPLICATE_NEGOTIATION_ISSUE", "Each priority may appear only once.");
-    }
-    action.clauseIds.forEach((id) => findingById(analysis, id));
-    negotiation = { ...negotiation, priorities: action.clauseIds, state: "STRATEGY", updatedAt: now };
-  } else if (action.action === "CHOOSE_STRATEGY") {
-    requireState(negotiation, "STRATEGY");
-    if (!negotiation.priorities.includes(action.clauseId)) {
-      throw new HttpError(400, "UNKNOWN_NEGOTIATION_ISSUE", "The issue is not in the selected priorities.");
-    }
-    const strategies = { ...negotiation.strategies, [action.clauseId]: action.strategy };
-    const complete = negotiation.priorities.every((id) => strategies[id]);
-    negotiation = { ...negotiation, strategies, state: complete ? "DRAFT" : "STRATEGY", updatedAt: now };
-    if (complete) {
-      const draft = env.analysisProvider === "anthropic"
-        ? await generateNegotiationDraft(analysis.findings, negotiation.priorities, negotiation.strategies)
-        : draftMessage(analysis, negotiation);
-      negotiation = { ...negotiation, draft };
-    }
-  } else if (action.action === "SAVE_DRAFT") {
-    requireState(negotiation, "DRAFT");
-    const safeDraft = (await redactClauses([{
-      id: "DRAFT",
-      text: action.draft,
-      locations: [],
-    }])).clauses[0]!.text;
-    const likelyReplies = env.analysisProvider === "anthropic"
-      ? await generateLikelyLandlordReplies(safeDraft)
-      : [
-          "המשכיר מסכים לכל הבקשות — אשרו שהנוסח המתוקן מופיע בחוזה לפני חתימה.",
-          "המשכיר מסכים חלקית — חזרו על הבקשה החשובה ביותר והציעו חלופה ממוקדת.",
-          "המשכיר מסרב — שקלו אם הסיכון מקובל עליכם או פנו לייעוץ משפטי מוסמך.",
-        ];
-    negotiation = {
-      ...negotiation,
-      draft: action.draft,
-      state: "COUNTER",
-      likelyReplies,
-      updatedAt: now,
+// The tenant's own edit of the draft. It is kept as written; the same checks the agent's drafts
+// must pass are shown as warnings, since the tenant decides what to send.
+export async function saveDraftEdit(analysisId: string, userId: string, text: string) {
+  return exclusively(analysisId, async () => {
+    const record = await currentNegotiation(analysisId, userId);
+    requireState(record, "DRAFT");
+    if (!record.draft) throw new HttpError(409, "NEGOTIATION_NO_DRAFT", "The agent has not prepared a draft yet.");
+    const saved: NegotiationRecord = {
+      ...record,
+      draft: { ...record.draft, text, editedByTenant: true, warnings: tenantDraftWarnings(record, text) },
+      updatedAt: new Date().toISOString(),
     };
-  } else {
-    requireState(negotiation, "COUNTER");
-    negotiation = { ...negotiation, state: "DONE", updatedAt: now };
-  }
+    await (await getStore()).upsertNegotiation(saved);
+    return publicNegotiation(saved);
+  });
+}
 
-  await store.upsertNegotiation(negotiation);
-  return publicNegotiation(negotiation, analysis);
+export async function finalizeNegotiationDraft(analysisId: string, userId: string) {
+  return exclusively(analysisId, async () => {
+    const record = await currentNegotiation(analysisId, userId);
+    requireState(record, "DRAFT");
+    if (!record.draft) throw new HttpError(409, "NEGOTIATION_NO_DRAFT", "The agent has not prepared a draft yet.");
+    const finalized = await finalizeDraft(record, dependencies(record));
+    const saved: NegotiationRecord = {
+      ...finalized,
+      messages: [...finalized.messages, agentMessage(
+        "ההודעה נעולה ומוכנה לשליחה. הכנתי גם תגובות אפשריות לתשובות של המשכיר - אפשר לשאול אותי עליהן.",
+        ["סיימתי"],
+      )],
+      updatedAt: new Date().toISOString(),
+    };
+    await (await getStore()).upsertNegotiation(saved);
+    return publicNegotiation(saved);
+  });
+}
+
+export async function completeNegotiation(analysisId: string, userId: string) {
+  return exclusively(analysisId, async () => {
+    const record = await currentNegotiation(analysisId, userId);
+    requireState(record, "COUNTER");
+    const saved: NegotiationRecord = {
+      ...moveTo(record, "DONE"),
+      messages: [...record.messages, agentMessage("בהצלחה במשא ומתן! ההודעה נשארת כאן אם תצטרכו אותה שוב.")],
+      updatedAt: new Date().toISOString(),
+    };
+    await (await getStore()).upsertNegotiation(saved);
+    return publicNegotiation(saved);
+  });
 }

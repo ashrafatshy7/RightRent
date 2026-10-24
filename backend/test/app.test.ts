@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { after, before, test } from "node:test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { app } from "../src/app.js";
+import { getStore } from "../src/shared/data/store.js";
 
 let server: Server;
 let baseUrl: string;
@@ -423,30 +424,104 @@ test("analysis cache includes the confirmed preference snapshot", async () => {
   secondAnalysisId = body.analysis.analysisId;
 });
 
-test("negotiation follows PRIORITIZE through DONE and never sends a message", async () => {
+async function negotiationTurn(text: string) {
+  const response = await fetch(`${baseUrl}/api/negotiation/${analysisId}/messages`, authenticated({
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  }));
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /application\/x-ndjson/u);
+  const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+  return { events, last: events.at(-1) };
+}
+
+test("the negotiation agent talks the tenant from PRIORITIZE to DONE and never sends a message", async () => {
   assert.ok(analysisId);
   const post = (body: object) => fetch(`${baseUrl}/api/negotiation/${analysisId}`, authenticated({
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   }));
-  let response = await post({ action: "START" });
+
+  // Not started yet is a state, not an error.
+  let response = await fetch(`${baseUrl}/api/negotiation/${analysisId}`, authenticated());
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).negotiation, null);
+
+  response = await post({ action: "START" });
+  assert.equal(response.status, 200);
   let negotiation = (await response.json()).negotiation;
   assert.equal(negotiation.state, "PRIORITIZE");
+  assert.equal(negotiation.messages.length, 1);
+  assert.deepEqual(negotiation.messages[0].quickReplies, ["בלשון זכר", "בלשון נקבה", "בלשון רבים"]);
+  assert.equal("modelMessages" in negotiation, false);
+  // The agent starts out knowing the tenant's preferences and the whole (redacted) contract.
+  const started = await (await getStore()).getNegotiation(analysisId);
+  assert.ok(started?.context.preferences.some((line) => line.startsWith("תקציב מקסימלי לשכר דירה חודשי")));
+  assert.ok(started?.context.clauses.some((clause) => clause.clauseId === "C002" && /30000/u.test(clause.text)));
+  // Each flagged issue says why it was flagged, what the law says, and which preferences it touches.
+  const guarantee = started?.issues.find((issue) => issue.issueId === "C002");
+  assert.ok(guarantee?.flaggedBecause.includes("סותר את החוק"));
+  assert.ok(guarantee?.legalReferences.some((reference) => reference.section === "25י"));
+  assert.ok(guarantee?.relevantPreferences.some((line) => line.startsWith("סוגי הבטוחה שהוא מוכן לתת")));
 
-  response = await post({ action: "SET_PRIORITIES", clauseIds: ["C002"] });
-  negotiation = (await response.json()).negotiation;
+  // A state-skipping action is refused.
+  response = await post({ action: "FINALIZE_DRAFT" });
+  assert.equal(response.status, 409);
+
+  // Personal details the tenant types never reach the model, but stay visible to the tenant.
+  let turn = await negotiationTurn("בלשון נקבה. הטלפון שלי 050-1234567");
+  assert.equal(turn.last.type, "result");
+  assert.ok(turn.events.some((event) => event.type === "text"));
+  negotiation = turn.last.negotiation;
+  assert.equal(negotiation.addressForm, "FEMININE");
+  const stored = await (await getStore()).getNegotiation(analysisId);
+  assert.ok(!JSON.stringify(stored?.modelMessages).includes("050-1234567"));
+  assert.ok(JSON.stringify(stored?.modelMessages).includes("[PHONE_NUMBER]"));
+  assert.ok(negotiation.messages.some((message: { text: string }) => message.text.includes("050-1234567")));
+
+  turn = await negotiationTurn("הסדר מתאים לי");
+  negotiation = turn.last.negotiation;
   assert.equal(negotiation.state, "STRATEGY");
+  assert.ok(negotiation.priorities.includes("C002"));
 
-  response = await post({ action: "CHOOSE_STRATEGY", clauseId: "C002", strategy: "CITE_LAW" });
-  negotiation = (await response.json()).negotiation;
+  for (let guard = 0; negotiation.state === "STRATEGY" && guard < 20; guard += 1) {
+    const current = negotiation.issues.find((issue: { issueId: string }) => issue.issueId === negotiation.currentIssueId);
+    turn = await negotiationTurn(current.legalReferences.length ? "להסתמך על החוק" : "להציע חלופה");
+    assert.equal(turn.last.type, "result", JSON.stringify(turn.last));
+    negotiation = turn.last.negotiation;
+  }
   assert.equal(negotiation.state, "DRAFT");
-  assert.match(negotiation.draft, /25י/u);
+  assert.match(negotiation.draft.text, /25י/u);
+  assert.equal(negotiation.draft.editedByTenant, false);
+  assert.ok(negotiation.draft.sources.some((source: { issueId: string }) => source.issueId === "C002"));
 
-  response = await post({ action: "SAVE_DRAFT", draft: `${negotiation.draft}\nאשמח לתשובתך.` });
-  assert.equal((await response.json()).negotiation.state, "COUNTER");
-  response = await post({ action: "COMPLETE" });
-  assert.equal((await response.json()).negotiation.state, "DONE");
+  response = await post({ action: "SAVE_DRAFT", draft: `${negotiation.draft.text}\nאשמח לתשובתך.` });
+  negotiation = (await response.json()).negotiation;
+  assert.equal(negotiation.draft.editedByTenant, true);
+  assert.deepEqual(negotiation.draft.warnings, []);
+
+  response = await post({ action: "SAVE_DRAFT", draft: `${negotiation.draft.text}\nלפי סעיף 99 מגיע לי הנחה.` });
+  negotiation = (await response.json()).negotiation;
+  assert.equal(negotiation.draft.warnings.length, 1);
+
+  response = await post({ action: "FINALIZE_DRAFT" });
+  negotiation = (await response.json()).negotiation;
+  assert.equal(negotiation.state, "COUNTER");
+  assert.ok(negotiation.likelyReplies.length > 0);
+
+  turn = await negotiationTurn("סיימתי");
+  assert.equal(turn.last.negotiation.state, "DONE");
+
+  turn = await negotiationTurn("עוד משהו");
+  assert.equal(turn.last.type, "error");
+  assert.equal(turn.last.error.code, "NEGOTIATION_DONE");
+
+  response = await post({ action: "START", restart: true });
+  negotiation = (await response.json()).negotiation;
+  assert.equal(negotiation.state, "PRIORITIZE");
+  assert.equal(negotiation.messages.length, 1);
 });
 
 test("history can be listed and permanently deleted by its owner", async () => {

@@ -3,9 +3,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { BrandMark } from "../components/BrandMark";
 import { API_PATHS } from "../config/app";
-import { api } from "../lib/api-client";
+import { api, ApiError } from "../lib/api-client";
 import { LAW_STATUS_META, LAW_STATUS_ORDER } from "../lib/law-status";
-import type { LawApproval, LawSourceStatus } from "../types/api";
+import type { LawApproval, LawSourceStatus, Negotiation } from "../types/api";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -70,5 +70,43 @@ describe("shared frontend contracts", () => {
       status: "not_ready",
       activeLaws: "0/13",
     });
+  });
+  test("a negotiation message streams the agent's text and returns the saved negotiation", async () => {
+    const negotiation = { id: "n1", state: "STRATEGY" } as Negotiation;
+    const lines = [
+      { type: "text", delta: "שלום, " },
+      { type: "negotiation", negotiation: { ...negotiation, state: "PRIORITIZE" } },
+      { type: "text", delta: "נמשיך." },
+      { type: "result", negotiation },
+    ].map((event) => `${JSON.stringify(event)}\n`).join("");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(lines, {
+      status: 200,
+      headers: { "content-type": "application/x-ndjson" },
+    }));
+    const text: string[] = [];
+    const updates: Negotiation[] = [];
+
+    const result = await api.sendNegotiationMessage("tenant-token", "a1", "בלשון נקבה", {
+      onText: (delta) => text.push(delta),
+      onNegotiation: (next) => updates.push(next),
+    });
+
+    expect(result).toEqual(negotiation);
+    expect(text.join("")).toBe("שלום, נמשיך.");
+    expect(updates).toHaveLength(1);
+    const [path, init] = fetchMock.mock.calls[0]!;
+    expect(path).toBe(API_PATHS.negotiationMessages("a1"));
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer tenant-token");
+    expect(JSON.parse(String(init?.body))).toEqual({ text: "בלשון נקבה" });
+  });
+
+  test("an in-band negotiation error keeps its code for the tenant-facing message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      `${JSON.stringify({ type: "error", status: 409, error: { code: "NEGOTIATION_DONE", message: "done" } })}\n`,
+      { status: 200, headers: { "content-type": "application/x-ndjson" } },
+    ));
+    const sending = api.sendNegotiationMessage("tenant-token", "a1", "עוד", { onText: () => {}, onNegotiation: () => {} });
+    await expect(sending).rejects.toBeInstanceOf(ApiError);
+    await expect(sending).rejects.toMatchObject({ status: 409, code: "NEGOTIATION_DONE" });
   });
 });
