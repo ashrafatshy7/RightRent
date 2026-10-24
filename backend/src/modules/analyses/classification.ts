@@ -20,8 +20,8 @@ export function categoryForAssessment(assessment: LegalAssessment): FindingCateg
 
 const PAGE_MARKER = /^\s*(?:עמוד|עמ['׳]?\.?)\s*\d+(?:\s*(?:מתוך|\/)\s*\d+)?\s*$/u;
 const NUMBER_OR_DATE_ONLY = /^\s*\d{1,4}(?:[./-]\d{1,2}(?:[./-]\d{2,4})?)?\s*$/u;
-const SEPARATOR_ONLY = /^[\s\-–—_=*.]{1,80}$/u;
-const DOCUMENT_TITLE_ONLY = /^\s*חוזה\s+שכירות(?:\s+למגורים)?\s*(?:[—–-].*)?$/u;
+const SEPARATOR_ONLY = /^[\s\-\u2013\u2014_=*.]{1,80}$/u;
+const DOCUMENT_TITLE_ONLY = /^\s*חוזה\s+שכירות(?:\s+למגורים)?\s*(?:[\u2014\u2013-].*)?$/u;
 
 // A clause the tenant should never see a finding card for: a page number, a bare separator, a date
 // stamp, or the document's own title line. These carry no reviewable content, so calling the model

@@ -34,11 +34,11 @@ import type {
 const MAX_MESSAGE_LENGTH = 1_000;
 
 const STEPS: Array<{ state: NegotiationState; label: string }> = [
-  { state: "PRIORITIZE", label: "סדר עדיפויות" },
-  { state: "STRATEGY", label: "דרך פעולה" },
-  { state: "DRAFT", label: "ניסוח ההודעה" },
-  { state: "COUNTER", label: "תגובות המשכיר" },
-  { state: "DONE", label: "מוכן" },
+  { state: "PRIORITIZE", label: "מה הכי חשוב" },
+  { state: "STRATEGY", label: "מה לבקש" },
+  { state: "DRAFT", label: "כתיבת ההודעה" },
+  { state: "COUNTER", label: "תשובות המשכיר" },
+  { state: "DONE", label: "סיום" },
 ];
 
 const SEVERITY_META: Record<NegotiationIssue["severity"], { label: string; tone: string }> = {
@@ -49,22 +49,22 @@ const SEVERITY_META: Record<NegotiationIssue["severity"], { label: string; tone:
 };
 
 const STRATEGY_LABEL: Record<NegotiationStrategyKind, string> = {
-  CITE_LAW: "הסתמכות על החוק",
-  PROPOSE_ALTERNATIVE: "הצעת חלופה",
-  CONCEDE: "ויתור",
+  CITE_LAW: "מסתמכים על החוק",
+  PROPOSE_ALTERNATIVE: "מציעים חלופה",
+  CONCEDE: "מוותרים על זה",
 };
 
 // Backend errors carry English text for developers; the tenant sees these instead.
 const ERROR_TEXT: Record<string, string> = {
-  NEGOTIATION_BUSY: "הסוכן עדיין עונה על ההודעה הקודמת. נסו שוב בעוד רגע.",
+  NEGOTIATION_BUSY: "העוזר עדיין עונה על ההודעה הקודמת. נסו שוב בעוד רגע.",
   NEGOTIATION_DONE: "השיחה הסתיימה. אפשר להתחיל מחדש כדי להכין הודעה חדשה.",
   NEGOTIATION_TURN_LIMIT: "הגעתם למספר ההודעות המרבי בשיחה הזו. אפשר להתחיל מחדש.",
-  NEGOTIATION_NO_DRAFT: "הסוכן עוד לא הכין טיוטה.",
+  NEGOTIATION_NO_DRAFT: "העוזר עוד לא כתב טיוטה.",
   NO_NEGOTIABLE_FINDINGS: "לא נמצאו בחוזה נושאים שכדאי להעלות מול המשכיר.",
-  PII_REDACTION_FAILED: "לא הצלחנו להסיר פרט מזהה מההודעה. נסו לנסח אותה בלי מספרי זהות או טלפון.",
+  PII_REDACTION_FAILED: "לא הצלחנו להסיר פרט מזהה מההודעה. נסו לכתוב אותה בלי מספרי זהות או טלפון.",
   PII_NER_UNAVAILABLE: "שירות הסרת הפרטים האישיים לא זמין כרגע. נסו שוב בעוד כמה דקות.",
-  AI_PROVIDER_ERROR: "הסוכן לא זמין כרגע. נסו שוב בעוד רגע.",
-  NEGOTIATION_AGENT_STALLED: "הסוכן לא הצליח להשלים את התשובה. נסו לנסח את ההודעה אחרת.",
+  AI_PROVIDER_ERROR: "העוזר לא זמין כרגע. נסו שוב בעוד רגע.",
+  NEGOTIATION_AGENT_STALLED: "העוזר לא הצליח לסיים את התשובה. נסו לכתוב את ההודעה במילים אחרות.",
   NEGOTIATION_STREAM_ENDED: "התשובה נקטעה לפני שהסתיימה. נסו שוב.",
 };
 
@@ -137,14 +137,14 @@ export function NegotiationPage() {
   return (
     <div className="page-wrap negotiation-page">
       <PageHeader
-        eyebrow="סוכן משא ומתן"
-        title="הכנת השיחה עם המשכיר"
-        description="הסוכן עובר איתכם על הנושאים שנמצאו בחוזה, שואל מה חשוב לכם, ובסוף מנסח הודעת WhatsApp אחת. אתם בודקים, עורכים ושולחים אותה בעצמכם."
+        eyebrow="עוזר לשיחה עם המשכיר"
+        title="הכנת הודעה למשכיר"
+        description="העוזר עובר איתכם על הבעיות שמצאנו בחוזה, שואל מה חשוב לכם, ובסוף כותב הודעת WhatsApp אחת למשכיר. אתם קוראים, מתקנים ושולחים אותה בעצמכם."
         actions={(
           <div className="header-actions">
-            <Link className="secondary-button" to={ROUTES.analysis(analysisId)}><ArrowRight size={17} /> חזרה לניתוח</Link>
+            <Link className="secondary-button" to={ROUTES.analysis(analysisId)}><ArrowRight size={17} /> חזרה לתוצאות הבדיקה</Link>
             {negotiation ? (
-              <button className="ghost-button" type="button" onClick={restart} disabled={actionBusy}><RotateCcw size={16} /> להתחיל מחדש</button>
+              <button className="ghost-button" type="button" onClick={restart} disabled={actionBusy}><RotateCcw size={16} /> התחלה מחדש</button>
             ) : null}
           </div>
         )}
@@ -164,15 +164,15 @@ export function NegotiationPage() {
         <section className="negotiation-intro">
           <span className="negotiation-intro-icon"><MessageCircle size={28} /></span>
           <div>
-            <h2>שיחה קצרה, הודעה אחת מנומקת</h2>
+            <h2>איך זה עובד</h2>
             <ol>
-              <li>נקבע יחד אילו נושאים הכי חשובים לכם. אפשר גם להוסיף נושאים משלכם.</li>
-              <li>על כל נושא נדבר עד שברור מה אתם רוצים, במילים שלכם ובכמה הודעות שצריך. הסוכן בודק את הבקשות מול החוק ושואל על מה שחסר.</li>
-              <li>הסוכן מנסח הודעה אחת למשכיר, ומכין תשובות לתגובות סבירות שלו.</li>
+              <li>נסדר יחד את הנושאים לפי מה שהכי חשוב לכם. אפשר גם להוסיף נושאים משלכם.</li>
+              <li>על כל נושא נדבר עד שברור מה אתם רוצים. העוזר בודק את הבקשות מול החוק ושואל אם חסר משהו.</li>
+              <li>העוזר כותב הודעה אחת למשכיר, ומכין לכם תשובות לתגובות אפשריות שלו.</li>
             </ol>
-            <p className="negotiation-promise"><ShieldCheck size={16} /> פרטים מזהים מוסרים לפני כל פנייה למודל. הסוכן לא פונה למשכיר ולא שולח שום דבר.</p>
+            <p className="negotiation-promise"><ShieldCheck size={16} /> העוזר לא פונה למשכיר ולא שולח שום דבר בעצמו. פרטים מזהים מוסרים מההודעות שלכם.</p>
             <button className="primary-button" type="button" disabled={actionBusy} onClick={() => void runAction({ action: "START" })}>
-              <Sparkles size={17} /> {actionBusy ? "מתחילים…" : "בואו נתחיל"}
+              <Sparkles size={17} /> {actionBusy ? "מתחילים…" : "להתחלת השיחה"}
             </button>
           </div>
         </section>
@@ -194,7 +194,7 @@ function NegotiationWorkspace({ negotiation, token, analysisId, actionBusy, onNe
     <>
       {negotiation.agentMode === "SCRIPTED" ? (
         <p className="agent-demo-note" role="note">
-          מצב הדגמה: השרת לא מחובר ל־Claude, ותסריט קבוע עונה במקום הסוכן. הוא מבין רק את הכפתורים, וכל טקסט אחר נרשם כפי שנכתב.
+          מצב הדגמה: העוזר לא מחובר כרגע למודל, ותסריט קבוע עונה במקומו. הוא מבין רק את הכפתורים, וכל טקסט אחר נשמר כמו שכתבתם אותו.
         </p>
       ) : null}
       <Stepper state={negotiation.state} />
@@ -205,7 +205,7 @@ function NegotiationWorkspace({ negotiation, token, analysisId, actionBusy, onNe
           {negotiation.likelyReplies.length ? <RepliesPanel negotiation={negotiation} /> : null}
           {negotiation.state === "COUNTER" ? (
             <button className="secondary-button negotiation-finish" type="button" disabled={actionBusy} onClick={() => void onAction({ action: "COMPLETE" })}>
-              <CheckCircle2 size={17} /> סיימתי
+              <CheckCircle2 size={17} /> סיום השיחה
             </button>
           ) : null}
           <PlanPanel negotiation={negotiation} />
@@ -296,7 +296,7 @@ function ChatPanel({ negotiation, token, analysisId, disabled, onNegotiation, on
   const quickReplies = !pending && !done && last?.role === "AGENT" ? last.quickReplies : [];
 
   return (
-    <section className="negotiation-chat" aria-label="שיחה עם הסוכן">
+    <section className="negotiation-chat" aria-label="שיחה עם העוזר">
       <div className="chat-log" ref={logRef} role="log" aria-live="polite">
         {negotiation.messages.map((message) => (
           <div key={message.id} className={`chat-bubble ${message.role === "AGENT" ? "from-agent" : "from-tenant"}`}>
@@ -306,7 +306,7 @@ function ChatPanel({ negotiation, token, analysisId, disabled, onNegotiation, on
         {pendingTenantText ? <div className="chat-bubble from-tenant">{pendingTenantText}</div> : null}
         {pending ? (
           <div className="chat-bubble from-agent" aria-busy="true">
-            {streamed || <span className="typing-dots" aria-label="הסוכן כותב"><i /><i /><i /></span>}
+            {streamed || <span className="typing-dots" aria-label="העוזר כותב"><i /><i /><i /></span>}
           </div>
         ) : null}
       </div>
@@ -319,20 +319,20 @@ function ChatPanel({ negotiation, token, analysisId, disabled, onNegotiation, on
       ) : null}
       {error ? <ErrorNotice message={error} /> : null}
       {done ? (
-        <p className="chat-closed"><CheckCircle2 size={16} /> השיחה הסתיימה. ההודעה מחכה לכם בחלונית.</p>
+        <p className="chat-closed"><CheckCircle2 size={16} /> השיחה הסתיימה. ההודעה למשכיר מוכנה בצד.</p>
       ) : (
         <form className="chat-composer" onSubmit={submit}>
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="כתבו לסוכן…"
-            aria-label="הודעה לסוכן"
+            placeholder="כתבו כאן…"
+            aria-label="הודעה לעוזר"
             maxLength={MAX_MESSAGE_LENGTH}
             rows={2}
             disabled={pending || disabled}
           />
-          <button className="primary-button" type="submit" disabled={pending || disabled || !input.trim()} aria-label="שליחה לסוכן">
+          <button className="primary-button" type="submit" disabled={pending || disabled || !input.trim()} aria-label="שליחה">
             <Send size={17} />
           </button>
         </form>
@@ -371,9 +371,9 @@ function DraftPanel({ negotiation, busy, onAction }: {
       <div className="draft-heading">
         <div>
           <span className="eyebrow">ההודעה למשכיר</span>
-          <h2 id="draft-title">{editable ? "טיוטה לבדיקה" : "ההודעה מוכנה"}</h2>
+          <h2 id="draft-title">{editable ? "טיוטת ההודעה" : "ההודעה מוכנה"}</h2>
         </div>
-        {draft.editedByTenant ? <StatusBadge tone="review">נערכה על ידכם</StatusBadge> : <StatusBadge tone="success">נבדקה מול המקורות</StatusBadge>}
+        {draft.editedByTenant ? <StatusBadge tone="review">ערכתם אותה</StatusBadge> : <StatusBadge tone="success">נבדקה מול החוק</StatusBadge>}
       </div>
       <textarea
         className="draft-text"
@@ -397,7 +397,7 @@ function DraftPanel({ negotiation, busy, onAction }: {
         {editable ? (
           <>
             <button className="primary-button" type="button" disabled={busy || !text.trim()} onClick={() => void approve()}>
-              <Check size={17} /> אישור ההודעה
+              <Check size={17} /> ההודעה מתאימה לי
             </button>
             {dirty ? (
               <button className="secondary-button" type="button" disabled={busy || !text.trim()} onClick={() => void save()}>
@@ -416,12 +416,12 @@ function DraftPanel({ negotiation, busy, onAction }: {
       </div>
       <p className="draft-note">
         {editable
-          ? "אפשר לערוך כאן ישירות, או לבקש מהסוכן שינויים בצ'אט. אחרי האישור תוכלו לפתוח את ההודעה ב־WhatsApp."
-          : "WhatsApp ייפתח עם ההודעה, ואתם בוחרים למי לשלוח. שום דבר לא נשלח בלי שתלחצו שליחה."}
+          ? "אפשר לתקן את הטקסט כאן, או לבקש מהעוזר שינויים בשיחה. אחרי האישור תוכלו לפתוח את ההודעה ב־WhatsApp."
+          : "WhatsApp ייפתח עם ההודעה, ואתם בוחרים למי לשלוח. שום דבר לא נשלח עד שתלחצו על שליחה."}
       </p>
       {draft.sources.length ? (
         <details className="draft-sources">
-          <summary><Scale size={15} /> המקורות המשפטיים בהודעה</summary>
+          <summary><Scale size={15} /> הסעיפים בחוק שההודעה מסתמכת עליהם</summary>
           <ul>
             {draft.sources.map((source) => (
               <li key={source.issueId}>
@@ -450,8 +450,8 @@ function RepliesPanel({ negotiation }: { negotiation: Negotiation }) {
     : "על ההודעה כולה";
   return (
     <section className="replies-panel" aria-labelledby="replies-title">
-      <span className="eyebrow">אם המשכיר עונה ש…</span>
-      <h2 id="replies-title">תגובות אפשריות</h2>
+      <span className="eyebrow">אם המשכיר עונה…</span>
+      <h2 id="replies-title">מה אפשר לענות לו</h2>
       <ul>
         {negotiation.likelyReplies.map((reply, index) => (
           <li key={`${reply.issueId ?? "all"}-${index}`}>
@@ -476,8 +476,8 @@ function PlanPanel({ negotiation }: { negotiation: Negotiation }) {
     : negotiation.issues;
   return (
     <section className="plan-panel" aria-labelledby="plan-title">
-      <span className="eyebrow">{chosen ? "לפי סדר החשיבות שלכם" : "מה נמצא בחוזה"}</span>
-      <h2 id="plan-title">{chosen ? "התוכנית" : "הנושאים לשיחה"}</h2>
+      <span className="eyebrow">{chosen ? "לפי סדר החשיבות שלכם" : "מה מצאנו בחוזה"}</span>
+      <h2 id="plan-title">{chosen ? "מה תבקשו מהמשכיר" : "הנושאים לשיחה"}</h2>
       <ol>
         {listed.map((issue) => {
           const strategy = negotiation.strategies[issue.issueId];
@@ -492,7 +492,7 @@ function PlanPanel({ negotiation }: { negotiation: Negotiation }) {
                 <div className={`plan-strategy strategy-${strategy.kind.toLowerCase()}`}>
                   <span>{STRATEGY_LABEL[strategy.kind]}</span>
                   {strategy.request ? <p>{strategy.request}</p> : null}
-                  {strategy.fallback ? <p className="plan-fallback">המינימום שלכם (לא נכלל בהודעה): {strategy.fallback}</p> : null}
+                  {strategy.fallback ? <p className="plan-fallback">הכי פחות שתסכימו לקבל (לא יופיע בהודעה): {strategy.fallback}</p> : null}
                 </div>
               ) : current ? <span className="plan-now">מדברים על זה עכשיו</span> : null}
             </li>

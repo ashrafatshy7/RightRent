@@ -116,7 +116,7 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
   });
 
   if (!terms) {
-    return <div className="cost-empty"><Info size={20} /><p>הניתוח הזה נוצר לפני שנוסף מחשבון העלויות. כדי לראות את עלות החוזה, נתחו את החוזה מחדש.</p></div>;
+    return <div className="cost-empty"><Info size={20} /><p>הבדיקה הזו נעשתה לפני שהוספנו את מחשבון העלויות. כדי לראות את עלות החוזה, בדקו אותו שוב.</p></div>;
   }
   if (query.isLoading) return <LoadingState label="מחשבים את עלות החוזה" />;
   if (query.error || !query.data) return <ErrorNotice message={messageForError(query.error, "לא הצלחנו לחשב את העלות.")} />;
@@ -138,15 +138,15 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
     <div className="cost-simulator">
       {simulation.ready ? (
         <section className="cost-summary" aria-label="סיכום העלות">
-          <article><Wallet size={20} /><div><span>עלות כוללת</span><strong>{formatCurrency(simulation.totals.total)}</strong><small>{simulation.months.filter((month) => month.phase === "TERM" || month.phase === "OPTION").length} חודשי מגורים</small></div></article>
-          <article><Calculator size={20} /><div><span>ממוצע לכל חודש מגורים</span><strong>{formatCurrency(simulation.totals.averageMonthly)}</strong><small>כולל תשלומים וקנסות בתרחיש</small></div></article>
-          <article><Lock size={20} /><div><span>מופקד בבטוחות</span><strong>{formatCurrency(simulation.security.total)}</strong><small>{simulation.security.cashLocked ? `${formatCurrency(simulation.security.cashLocked)} במזומן` : "לא במזומן"}{simulation.security.returnDays ? ` · יוחזר תוך ${simulation.security.returnDays} ימים` : ""}</small></div></article>
+          <article><Wallet size={20} /><div><span>סך כל העלות</span><strong>{formatCurrency(simulation.totals.total)}</strong><small>{simulation.months.filter((month) => month.phase === "TERM" || month.phase === "OPTION").length} חודשי מגורים</small></div></article>
+          <article><Calculator size={20} /><div><span>ממוצע לחודש</span><strong>{formatCurrency(simulation.totals.averageMonthly)}</strong><small>כולל תשלומים שוטפים וקנסות</small></div></article>
+          <article><Lock size={20} /><div><span>ערבויות ופיקדונות</span><strong>{formatCurrency(simulation.security.total)}</strong><small>{simulation.security.cashLocked ? `${formatCurrency(simulation.security.cashLocked)} במזומן` : "בלי מזומן"}{simulation.security.returnDays ? `, יוחזר תוך ${simulation.security.returnDays} ימים` : ""}</small></div></article>
           {Math.abs(difference) >= 1 ? (
-            <article className={difference > 0 ? "cost-up" : "cost-down"}><TrendingUp size={20} /><div><span>לעומת מגורים עד סוף התקופה</span><strong>{difference > 0 ? "+" : "−"}{formatCurrency(Math.abs(difference))}</strong><small>בגלל האירועים שבחרתם בתרחיש</small></div></article>
+            <article className={difference > 0 ? "cost-up" : "cost-down"}><TrendingUp size={20} /><div><span>לעומת מגורים עד סוף החוזה</span><strong>{difference > 0 ? "+" : "−"}{formatCurrency(Math.abs(difference))}</strong><small>בגלל מה שבחרתם בתרחיש</small></div></article>
           ) : null}
         </section>
       ) : (
-        <div className="cost-empty"><Info size={20} /><p>כדי לחשב את העלות חסרים {simulation.missing.map((field) => (field === "monthlyRent" ? "דמי השכירות החודשיים" : "משך תקופת השכירות")).join(" ו")}. אפשר להזין אותם בטבלה למטה.</p></div>
+        <div className="cost-empty"><Info size={20} /><p>כדי לחשב את העלות חסרים לנו {simulation.missing.map((field) => (field === "monthlyRent" ? "דמי השכירות החודשיים" : "משך תקופת השכירות")).join(" ו")}. אפשר להזין אותם בטבלה למטה.</p></div>
       )}
 
       {simulation.budget.firstMonthOverBudget !== null || simulation.budget.firstMonthOverTotalBudget !== null || simulation.increase.exceedsPreference ? (
@@ -158,22 +158,22 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
       ) : null}
 
       <section className="cost-scenario" aria-label="תרחיש">
-        <h3>מה אם…</h3>
+        <h3>בדיקת תרחישים: מה קורה אם…</h3>
         {inputs.indexation.linked ? (
-          <label className="scenario-control"><span>אינפלציה שנתית <b>{formatNumber(effective.annualInflationPercent)}%</b></span><input type="range" min="-2" max="8" step="0.1" value={effective.annualInflationPercent} onChange={(event) => update({ annualInflationPercent: Number(event.target.value) })} /><small>{cpiLabel}</small></label>
-        ) : <p className="scenario-note">החוזה אינו צמוד למדד, ולכן האינפלציה לא משנה את דמי השכירות.</p>}
+          <label className="scenario-control"><span>אינפלציה שנתית צפויה <b>{formatNumber(effective.annualInflationPercent)}%</b></span><input type="range" min="-2" max="8" step="0.1" value={effective.annualInflationPercent} onChange={(event) => update({ annualInflationPercent: Number(event.target.value) })} /><small>{cpiLabel}</small></label>
+        ) : <p className="scenario-note">החוזה לא צמוד למדד, ולכן האינפלציה לא משפיעה על שכר הדירה.</p>}
         {inputs.option.months ? (
-          <label className="scenario-toggle"><input type="checkbox" checked={effective.includeOption} disabled={effective.exitAfterMonth !== null} onChange={(event) => update({ includeOption: event.target.checked })} /> לכלול את תקופת האופציה ({inputs.option.months} חודשים)</label>
+          <label className="scenario-toggle"><input type="checkbox" checked={effective.includeOption} disabled={effective.exitAfterMonth !== null} onChange={(event) => update({ includeOption: event.target.checked })} /> להוסיף את תקופת האופציה ({inputs.option.months} חודשים)</label>
         ) : null}
         {term > 1 ? (
-          <label className="scenario-control"><span>יציאה מוקדמת <b>{effective.exitAfterMonth ? `אחרי ${effective.exitAfterMonth} חודשים` : "בלי"}</b></span><input type="range" min="0" max={term - 1} step="1" value={effective.exitAfterMonth ?? 0} onChange={(event) => update({ exitAfterMonth: Number(event.target.value) || null })} /><small>{inputs.earlyExit.kind ? EXIT_LABELS[inputs.earlyExit.kind] : "החוזה לא קובע מה קורה ביציאה מוקדמת"}</small></label>
+          <label className="scenario-control"><span>עזיבה לפני סוף החוזה <b>{effective.exitAfterMonth ? `אחרי ${effective.exitAfterMonth} חודשים` : "בלי"}</b></span><input type="range" min="0" max={term - 1} step="1" value={effective.exitAfterMonth ?? 0} onChange={(event) => update({ exitAfterMonth: Number(event.target.value) || null })} /><small>{inputs.earlyExit.kind ? EXIT_LABELS[inputs.earlyExit.kind] : "החוזה לא קובע מה קורה אם עוזבים מוקדם"}</small></label>
         ) : null}
         {effective.exitAfterMonth && inputs.earlyExit.kind === "UNTIL_REPLACEMENT" ? (
           <label className="scenario-control"><span>שוכר חלופי נמצא אחרי <b>{effective.replacementAfterMonths} חודשים</b></span><input type="range" min="0" max="6" step="1" value={effective.replacementAfterMonths} onChange={(event) => update({ replacementAfterMonths: Number(event.target.value) })} /></label>
         ) : null}
         <div className="scenario-pair">
           <label className="scenario-number">איחור בפינוי<span><input type="number" min="0" max="60" value={effective.lateVacatingDays} onChange={(event) => update({ lateVacatingDays: Math.max(0, Number(event.target.value) || 0) })} /> ימים</span></label>
-          <label className="scenario-number">איחור בתשלום אחד<span><input type="number" min="0" max="60" value={effective.latePaymentDays} onChange={(event) => update({ latePaymentDays: Math.max(0, Number(event.target.value) || 0) })} /> ימים</span></label>
+          <label className="scenario-number">איחור בתשלום שכר דירה<span><input type="number" min="0" max="60" value={effective.latePaymentDays} onChange={(event) => update({ latePaymentDays: Math.max(0, Number(event.target.value) || 0) })} /> ימים</span></label>
         </div>
       </section>
 
@@ -197,8 +197,8 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
       {notes.length ? <ul className="cost-notes">{notes.map((note) => <li key={note}><Info size={14} /> {note}</li>)}</ul> : null}
 
       <section className="cost-terms" aria-label="מה זיהינו בחוזה">
-        <h3>מה זיהינו בחוזה</h3>
-        <p className="cost-terms-intro">כל ערך מקושר לסעיף שממנו נלקח. ערך שלא אומת לא נכנס לחישוב עד שתאשרו אותו, ואפשר לתקן כל ערך.</p>
+        <h3>הסכומים והתנאים שמצאנו בחוזה</h3>
+        <p className="cost-terms-intro">ליד כל ערך מופיע הסעיף שממנו לקחנו אותו. ערך שלא אומת לא נכנס לחישוב עד שתאשרו אותו. אפשר לתקן כל ערך בלחיצה על סמל העיפרון.</p>
         {save.error ? <ErrorNotice message={messageForError(save.error)} /> : null}
         <div className="terms-table">
           {rows.map((row) => (
@@ -222,7 +222,7 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
               ) : null}
             </div>
             <div className="term-source">{terms.indexation ? <SourceChip source={terms.indexation} labelFor={labelFor} onShowClause={onShowClause} /> : <small>לא צוין בחוזה</small>}</div>
-            <div className="term-status">{overrides.indexationLinked !== undefined || overrides.indexationFrequency ? <StatusBadge tone="review">עודכן על ידכם</StatusBadge> : <SourceStatus source={terms.indexation} />}</div>
+            <div className="term-status">{overrides.indexationLinked !== undefined || overrides.indexationFrequency ? <StatusBadge tone="review">עדכנתם ידנית</StatusBadge> : <SourceStatus source={terms.indexation} />}</div>
           </div>
           <div className="term-row">
             <div className="term-label">יציאה מוקדמת</div>
@@ -233,11 +233,11 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
               </select>
             </div>
             <div className="term-source">{terms.earlyExit ? <SourceChip source={terms.earlyExit} labelFor={labelFor} onShowClause={onShowClause} /> : <small>לא צוין בחוזה</small>}</div>
-            <div className="term-status">{overrides.earlyExitKind ? <StatusBadge tone="review">עודכן על ידכם</StatusBadge> : <SourceStatus source={terms.earlyExit} />}</div>
+            <div className="term-status">{overrides.earlyExitKind ? <StatusBadge tone="review">עדכנתם ידנית</StatusBadge> : <SourceStatus source={terms.earlyExit} />}</div>
           </div>
         </div>
       </section>
-      <p className="cost-disclaimer">הערכה בלבד ואינה ייעוץ פיננסי. האינפלציה העתידית אינה ידועה, וסכומים שהחוזה לא מציין אינם כלולים אלא אם הזנתם אותם.</p>
+      <p className="cost-disclaimer">זו הערכה בלבד ולא ייעוץ פיננסי. אי אפשר לדעת מה תהיה האינפלציה בעתיד, וסכומים שלא כתובים בחוזה נכנסים לחישוב רק אם הזנתם אותם.</p>
     </div>
   );
 }
@@ -353,9 +353,9 @@ function termRows(analysis: Analysis, indexed: boolean): TermRow[] {
 
 function SourceStatus({ source }: { source: TermSource | null }) {
   if (!source) return <StatusBadge tone="pending">לא צוין</StatusBadge>;
-  if (source.conflict) return <StatusBadge tone="warning">שני ערכים שונים · אשרו</StatusBadge>;
-  if (!source.verified) return <StatusBadge tone="warning">לא אומת · אשרו</StatusBadge>;
-  return <StatusBadge tone="success">מהחוזה</StatusBadge>;
+  if (source.conflict) return <StatusBadge tone="warning">יש שני ערכים, נא לאשר</StatusBadge>;
+  if (!source.verified) return <StatusBadge tone="warning">לא אומת, נא לאשר</StatusBadge>;
+  return <StatusBadge tone="success">נלקח מהחוזה</StatusBadge>;
 }
 
 function SourceChip({ source, labelFor, onShowClause }: { source: TermSource; labelFor: (clauseId: string) => string; onShowClause: (clauseId: string) => void }) {
@@ -391,15 +391,15 @@ function TermRowView({ row, labelFor, onShowClause, saving, onSave }: {
           </form>
         ) : (
           <>
-            <span>{row.value ?? "—"}</span>
+            <span>{row.value ?? "לא צוין"}</span>
             {row.edit ? <button type="button" className="term-edit-button" onClick={() => setDraft(row.edit!.current === null ? "" : String(row.edit!.current))} aria-label={`עריכת ${row.label}`}><Pencil size={13} /></button> : null}
           </>
         )}
       </div>
       <div className="term-source">{row.source ? <SourceChip source={row.source} labelFor={labelFor} onShowClause={onShowClause} /> : <small>לא צוין בחוזה</small>}</div>
       <div className="term-status">{row.overridden
-        ? <StatusBadge tone="review">עודכן על ידכם</StatusBadge>
-        : row.source && row.value === null ? <StatusBadge tone="pending">סכום לא צוין</StatusBadge> : <SourceStatus source={row.source} />}</div>
+        ? <StatusBadge tone="review">עדכנתם ידנית</StatusBadge>
+        : row.source && row.value === null ? <StatusBadge tone="pending">אין סכום בחוזה</StatusBadge> : <SourceStatus source={row.source} />}</div>
     </div>
   );
 }
@@ -425,7 +425,7 @@ function CostChart({ months }: { months: CostMonth[] }) {
   const labelEvery = Math.ceil(months.length / 12);
   return (
     <section className="cost-chart" aria-label="עלות לפי חודש">
-      <h3>עלות לפי חודש</h3>
+      <h3>העלות בכל חודש</h3>
       <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT + 22}`} role="img" aria-label="תרשים עמודות של העלות החודשית">
         {[0.25, 0.5, 0.75, 1].map((fraction) => (
           <line key={fraction} x1="0" x2={CHART_WIDTH} y1={CHART_HEIGHT * (1 - fraction)} y2={CHART_HEIGHT * (1 - fraction)} className="chart-grid" />
@@ -450,7 +450,7 @@ function CostChart({ months }: { months: CostMonth[] }) {
       </svg>
       <div className="chart-legend">{SEGMENTS.map((segment) => <span key={segment.key}><i className={`segment-${segment.key}`} />{segment.label}</span>)}</div>
       <details className="chart-table">
-        <summary>הצגת הטבלה החודשית</summary>
+        <summary>הצגת הפירוט לפי חודשים</summary>
         <table>
           <thead><tr><th>חודש</th><th>שלב</th><th>שכירות</th><th>הצמדה והעלאות</th><th>תשלומים</th><th>חד־פעמי וקנסות</th><th>סה״כ</th><th>מצטבר</th></tr></thead>
           <tbody>{months.map((month) => (

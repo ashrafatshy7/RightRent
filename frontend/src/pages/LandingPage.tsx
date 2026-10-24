@@ -6,8 +6,8 @@ import { ROUTES } from "../config/app";
 
 const trustPoints = [
   { icon: Scale, title: "חוק לפני ניחוש", text: "כל קביעה משפטית מחוברת למקור ולסעיף שנבדק." },
-  { icon: Fingerprint, title: "הפרטים נשארים פרטיים", text: "זיהוי פרטים אישיים מתבצע מקומית לפני כל שימוש בענן." },
-  { icon: FileCheck2, title: "גם מה שלא כתוב חשוב", text: "המערכת מזהה הגנות שחסרות בחוזה ומציעה ניסוח ברור." },
+  { icon: Fingerprint, title: "הפרטים נשארים פרטיים", text: "שמות, טלפונים ומספרי זהות מוסרים מהחוזה לפני הבדיקה." },
+  { icon: FileCheck2, title: "גם מה שלא כתוב חשוב", text: "נראה לכם אילו הגנות חסרות בחוזה, ונציע נוסח ברור להוספה." },
 ] as const;
 
 export function LandingPage() {
@@ -17,7 +17,7 @@ export function LandingPage() {
       <header className="landing-nav">
         <BrandMark />
         <nav>
-          <a href="#how-it-works">איך זה עובד</a>
+          <a href="#why-rightrent">למה RightRent</a>
           <a href="#privacy">פרטיות</a>
           <Link className="text-link" to={user ? ROUTES.app : ROUTES.login}>{user ? "לחשבון שלי" : "כניסה"}</Link>
           <Link className="primary-button compact-button" to={user ? ROUTES.upload : ROUTES.register}>
@@ -29,9 +29,9 @@ export function LandingPage() {
       <main>
         <section className="hero-section">
           <div className="hero-copy">
-            <span className="hero-kicker"><ShieldCheck size={17} /> בדיקת חוזה שמתחילה בזכויות שלך</span>
+            <span className="hero-kicker"><ShieldCheck size={17} /> בדיקת חוזה שמתחילה בזכויות שלכם</span>
             <h1>לא חותמים<br />לפני ש<span>מבינים.</span></h1>
-            <p>RightRent קוראת את חוזה השכירות, מסמנת סעיפים מסוכנים, משווה אותם להעדפות שלך ומראה בדיוק על מה כדאי להתעכב.</p>
+            <p>RightRent קוראת את חוזה השכירות, מסמנת סעיפים מסוכנים, משווה אותם להעדפות שלכם ומראה בדיוק על מה כדאי להתעכב.</p>
             <div className="hero-actions">
               <Link className="primary-button" to={user ? ROUTES.upload : ROUTES.register}>בדקו את החוזה <ArrowLeft size={19} /></Link>
               <span><CheckCircle2 size={17} /> PDF אחד. תמונה ברורה. לפני החתימה.</span>
@@ -54,7 +54,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="trust-strip" id="how-it-works">
+        <section className="trust-strip" id="why-rightrent">
           {trustPoints.map(({ icon: Icon, title, text }, index) => (
             <article key={title}><span>0{index + 1}</span><Icon size={23} /><div><h2>{title}</h2><p>{text}</p></div></article>
           ))}
@@ -62,12 +62,12 @@ export function LandingPage() {
 
         <section className="privacy-callout" id="privacy">
           <div className="privacy-stamp"><Fingerprint size={34} /></div>
-          <div><span className="eyebrow">פרטיות לפי תכנון</span><h2>החוזה שלך אינו חומר גלם.</h2></div>
-          <p>שמות, כתובות, טלפונים ומזהים מוסרים מקומית. רק הטקסט הנחוץ לניתוח ממשיך הלאה, עם בדיקה שחוסמת דליפה לפני שליחה.</p>
+          <div><span className="eyebrow">הפרטיות שלכם</span><h2>החוזה שלכם נשאר שלכם.</h2></div>
+          <p>לפני הבדיקה אנחנו מסירים מהחוזה שמות, כתובות, טלפונים ומספרי זהות. רק הטקסט שצריך לבדיקה ממשיך הלאה, ובדיקה נוספת מוודאת שלא נשאר בו פרט אישי.</p>
         </section>
       </main>
 
-      <footer className="landing-footer"><BrandMark /><p>כלי תומך החלטה — אינו תחליף לייעוץ משפטי.</p></footer>
+      <footer className="landing-footer"><BrandMark /><p>RightRent עוזרת להבין את החוזה, אבל היא לא תחליף לייעוץ משפטי.</p></footer>
     </div>
   );
 }

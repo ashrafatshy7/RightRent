@@ -77,18 +77,18 @@ driver keeps equivalent process-local counters for tests and offline development
 Public:
 
 - `GET /api/health`
-- `GET /api/health/ready` — database readiness and, in RAG mode, all 13 active laws,
+- `GET /api/health/ready`: database readiness and, in RAG mode, all 13 active laws,
   Vector Search, and local NER readiness
-- `POST /api/auth/register` — `{ "email": string, "password": string }`
-- `POST /api/auth/login` — `{ "email": string, "password": string }`
+- `POST /api/auth/register`: `{ "email": string, "password": string }`
+- `POST /api/auth/login`: `{ "email": string, "password": string }`
 
 Authenticated with `Authorization: Bearer <token>`:
 
 - `GET /api/auth/me`
 - `GET /api/users/preferences`
 - `PUT /api/users/preferences`
-- `POST /api/contracts/upload` — multipart field `contract`
-- `POST /api/contracts/:id/analyze` — `{ "confirmPreferences": true, "preferences"?: ... }`
+- `POST /api/contracts/upload`: multipart field `contract`
+- `POST /api/contracts/:id/analyze`: `{ "confirmPreferences": true, "preferences"?: ... }`
 - `GET /api/analyses/:id`
 - `GET /api/analyses/:id/marked-pdf`
 - `GET /api/history`

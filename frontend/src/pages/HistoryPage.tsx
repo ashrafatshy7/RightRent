@@ -8,8 +8,14 @@ import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/PageHeader";
 import { ROUTES } from "../config/app";
 import { api, messageForError } from "../lib/api-client";
-import { formatDate, formatDuration } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { groupByContract, previousVersionAnalysis } from "../lib/versions";
+
+function verdictLine(summary: { critical: number; warnings: number }) {
+  if (summary.critical) return { tone: "verdict-text-critical", text: "יש סעיפים שכדאי לתקן לפני החתימה" };
+  if (summary.warnings) return { tone: "verdict-text-warning", text: "אין בעיות חמורות, אבל יש נקודות לבדוק" };
+  return { tone: "verdict-text-success", text: "לא מצאנו בעיות בחוזה" };
+}
 
 export function HistoryPage() {
   const { token } = useAuth();
@@ -19,16 +25,16 @@ export function HistoryPage() {
     mutationFn: (analysisId: string) => api.deleteHistory(token!, analysisId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["history"] }),
   });
-  if (query.isLoading) return <LoadingState label="פותחים את הארכיון" />;
+  if (query.isLoading) return <LoadingState label="טוענים את החוזים שלכם" />;
   if (query.error) return <ErrorNotice message={messageForError(query.error)} />;
   const analyses = query.data?.analyses ?? [];
 
   return (
     <div className="page-wrap">
-      <PageHeader eyebrow="הארכיון האישי" title="היסטוריית חוזים" description="כל בדיקה נשמרת עם ההעדפות והמקורות שהיו פעילים באותו רגע." actions={<Link className="secondary-button" to={ROUTES.upload}><FileSearch size={17} /> בדיקה חדשה</Link>} />
+      <PageHeader title="החוזים שלי" description="כל בדיקה שעשיתם נשמרת כאן. אפשר לפתוח אותה שוב, להשוות בין גרסאות או למחוק." actions={<Link className="secondary-button" to={ROUTES.upload}><FileSearch size={17} /> בדיקה חדשה</Link>} />
       {remove.error ? <ErrorNotice message={messageForError(remove.error)} /> : null}
       {analyses.length === 0 ? (
-        <EmptyState icon={FileClock} title="הארכיון עדיין ריק" action={<Link className="primary-button" to={ROUTES.upload}>בדיקת חוזה ראשון</Link>}>הניתוח הראשון שתבצעו יופיע כאן עם המסמך המסומן.</EmptyState>
+        <EmptyState icon={FileClock} title="עוד אין כאן חוזים" action={<Link className="primary-button" to={ROUTES.upload}>לבדיקת החוזה הראשון</Link>}>אחרי שתבדקו חוזה, הוא יופיע כאן יחד עם התוצאות.</EmptyState>
       ) : (
         <div className="history-groups">
           {groupByContract(analyses).map((group) => (
@@ -38,13 +44,14 @@ export function HistoryPage() {
                 {group.entries.map((analysis) => {
                   const previous = previousVersionAnalysis(analyses, analysis.analysisId);
                   const version = analysis.contract?.version ?? 1;
+                  const verdict = verdictLine(analysis.summary);
                   return (
                     <article className="history-item" key={analysis.analysisId}>
                       <div className="history-number">{String(version).padStart(2, "0")}</div>
-                      <div className="history-main"><span>{formatDate(analysis.createdAt)}</span><h2>{group.versionCount > 1 ? `גרסה ${version}` : "בדיקת חוזה שכירות"}</h2><small>מזהה {analysis.analysisId.slice(0, 12)}</small></div>
-                      <div className="history-summary"><span className="summary-red"><b>{analysis.summary.critical}</b> קריטיים</span><span className="summary-orange"><b>{analysis.summary.warnings}</b> אזהרות</span><span className="summary-green"><b>{analysis.summary.compliant}</b> תקינים</span></div>
-                      <div className="history-meta">{previous ? <Link className="history-compare" to={ROUTES.compare(previous.analysisId, analysis.analysisId)}><GitCompareArrows size={15} /> מה השתנה</Link> : <><span>{formatDuration(analysis.timingMs.total)}</span><small>{analysis.privacy.redactedEntityCount} פרטים הוסרו</small></>}</div>
-                      <div className="history-actions"><Link to={ROUTES.analysis(analysis.analysisId)} aria-label="פתיחת הניתוח"><ArrowLeft size={19} /></Link><button type="button" disabled={remove.isPending} onClick={() => { if (window.confirm("למחוק לצמיתות את הניתוח והקבצים שלו?")) remove.mutate(analysis.analysisId); }} aria-label="מחיקת הניתוח"><Trash2 size={17} /></button></div>
+                      <div className="history-main"><span>{formatDate(analysis.createdAt)}</span><h2><Link className="history-open" to={ROUTES.analysis(analysis.analysisId)}>{group.versionCount > 1 ? `גרסה ${version}` : "בדיקת חוזה שכירות"}</Link></h2><small className={verdict.tone}>{verdict.text}</small></div>
+                      <div className="history-summary"><span className="summary-red"><b>{analysis.summary.critical}</b> דורשים טיפול</span><span className="summary-orange"><b>{analysis.summary.warnings}</b> כדאי לבדוק</span><span className="summary-green"><b>{analysis.summary.compliant}</b> תקינים</span></div>
+                      <div className="history-meta">{previous ? <Link className="history-compare" to={ROUTES.compare(previous.analysisId, analysis.analysisId)}><GitCompareArrows size={15} /> מה השתנה מהגרסה הקודמת</Link> : null}</div>
+                      <div className="history-actions"><Link to={ROUTES.analysis(analysis.analysisId)} aria-label="פתיחת התוצאות"><ArrowLeft size={19} /></Link><button type="button" disabled={remove.isPending} onClick={() => { if (window.confirm("למחוק את הבדיקה הזו ואת הקובץ שלה? אי אפשר לבטל את המחיקה.")) remove.mutate(analysis.analysisId); }} aria-label="מחיקת הבדיקה"><Trash2 size={17} /></button></div>
                     </article>
                   );
                 })}

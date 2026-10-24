@@ -24,7 +24,7 @@ describe("shared frontend contracts", () => {
 
   test("the brand exposes the product promise accessibly", () => {
     render(<MemoryRouter><BrandMark /></MemoryRouter>);
-    expect(screen.getByRole("link", { name: "RightRent — דף הבית" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "RightRent, דף הבית" })).toBeInTheDocument();
     expect(screen.getByText("זכות לפני חתימה")).toBeInTheDocument();
   });
 

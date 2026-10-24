@@ -3,7 +3,7 @@ import { APP, ROUTES } from "../config/app";
 
 export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
-    <Link className="brand-mark" to={ROUTES.landing} aria-label="RightRent — דף הבית">
+    <Link className="brand-mark" to={ROUTES.landing} aria-label="RightRent, דף הבית">
       <span className="brand-symbol" aria-hidden="true">
         <svg viewBox="0 0 48 48" role="img">
           <path d="M8 18 24 7l16 11v21H8Z" />

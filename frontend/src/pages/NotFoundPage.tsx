@@ -4,5 +4,5 @@ import { BrandMark } from "../components/BrandMark";
 import { ROUTES } from "../config/app";
 
 export function NotFoundPage() {
-  return <main className="not-found"><BrandMark /><span><FileQuestion size={34} /></span><h1>העמוד הזה לא נמצא</h1><p>כנראה שהקישור השתנה או שהמסמך הועבר.</p><Link className="primary-button" to={ROUTES.landing}><ArrowRight size={18} /> חזרה להתחלה</Link></main>;
+  return <main className="not-found"><BrandMark /><span><FileQuestion size={34} /></span><h1>לא מצאנו את הדף הזה</h1><p>ייתכן שהקישור שגוי או שהדף הוסר.</p><Link className="primary-button" to={ROUTES.landing}><ArrowRight size={18} /> חזרה לדף הבית</Link></main>;
 }
