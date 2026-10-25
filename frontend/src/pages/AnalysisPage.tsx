@@ -305,7 +305,7 @@ export function AnalysisPage() {
             <button type="button" className="verdict-count count-warning" onClick={() => showFindings("ORANGE")}><strong>{analysis.summary.warnings}</strong><span>כדאי לבדוק</span></button>
             <button type="button" className="verdict-count count-success" onClick={() => showFindings("OK")}><strong>{analysis.summary.compliant}</strong><span>תקינים</span></button>
             {analysis.protectionReport.length ? (
-              <button type="button" className="verdict-count count-protections" onClick={() => showTab("protections")}><strong>{incompleteProtections}</strong><span>הגנות שחסרות בחוזה</span></button>
+              <button type="button" className="verdict-count count-protections" onClick={() => showTab("protections")}><strong>{incompleteProtections}</strong><span>הגנות חסרות או חלקיות</span></button>
             ) : null}
           </div>
         </div>
@@ -434,9 +434,10 @@ const PROTECTION_ORDER: Record<Protection["status"], number> = { MISSING: 0, PAR
 
 function ProtectionPanel({ analysis, findingsByClauseId, onOpenFinding }: { analysis: Analysis; findingsByClauseId: Map<string, Finding>; onOpenFinding: (clauseId: string) => void }) {
   const protections = analysis.protectionReport.toSorted((left, right) => PROTECTION_ORDER[left.status] - PROTECTION_ORDER[right.status]);
+  const allCovered = protections.every((protection) => protection.status === "COVERED");
   return (
     <>
-      <div className="section-heading"><div><span className="eyebrow">מה חסר בחוזה</span><h2>הגנות שכדאי שיהיו בחוזה</h2></div><FileCheck2 size={24} /></div>
+      <div className="section-heading"><div><span className="eyebrow">רשימת בדיקה</span><h2>{allCovered ? "כל ההגנות החשובות קיימות בחוזה" : "הגנות חשובות בחוזה"}</h2></div><FileCheck2 size={24} /></div>
       <div className="protection-progress"><span style={{ width: `${coveragePercent(analysis)}%` }} /><small>{coveragePercent(analysis)}% מההגנות קיימות בחוזה</small></div>
       <div className="protection-list">
         {protections.map((protection) => {

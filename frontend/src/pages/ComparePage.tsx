@@ -119,7 +119,7 @@ export function ComparePage() {
         </section>
 
         <aside className="compare-protections protection-panel">
-          <div className="section-heading"><div><span className="eyebrow">מה חסר בחוזה</span><h2>הגנות בחוזה</h2></div></div>
+          <div className="section-heading"><div><span className="eyebrow">רשימת בדיקה</span><h2>הגנות בחוזה</h2></div></div>
           {changedProtections.length ? null : <p className="compare-empty">ההגנות זהות בשתי הגרסאות.</p>}
           <ul>
             {comparison.protections.map((protection) => (

@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Calculator, Check, Info, Lock, Pencil, TrendingUp, Wallet, X } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api, messageForError } from "../lib/api-client";
 import { formatCurrency, formatNumber } from "../lib/format";
 import { useDebouncedValue } from "../lib/use-debounced-value";
@@ -91,8 +91,26 @@ function withOverride(overrides: FinancialOverrides, target: EditTarget, value: 
   return { ...overrides, oneTimeAmounts: value === undefined ? costs : { ...costs, [target.cost]: value } };
 }
 
+const MAX_LATE_DAYS = 60;
+
+// The input's max is only a hint while typing; the API rejects fractions and anything over 365 days,
+// and a rejected request replaces the whole simulator with an error.
+function lateDays(value: string) {
+  return Math.min(MAX_LATE_DAYS, Math.max(0, Math.round(Number(value) || 0)));
+}
+
 function money(value: number | null | undefined) {
   return value === null || value === undefined ? null : formatCurrency(value);
+}
+
+// "Month 1" alone reads as if only that month is over budget, so a fixed rent that starts above the
+// limit is phrased as "from the first month", and a later crossing names the amount then and the peak.
+function budgetAlert(subject: string, budgetLabel: string, month: CostMonth, amountThen: number, peak: number, limit: number) {
+  const rises = peak > amountThen + 0.5;
+  if (month.month === 1) {
+    return `${subject} (${formatCurrency(amountThen)}) גבוהים מ${budgetLabel} (${formatCurrency(limit)}) כבר מהחודש הראשון${rises ? `, ובהמשך יעלו עד ${formatCurrency(peak)}` : ""}.`;
+  }
+  return `מחודש ${month.month} ${subject} יעלו ל־${formatCurrency(amountThen)} ויעברו את ${budgetLabel} (${formatCurrency(limit)})${rises ? `, ובהמשך יגיעו עד ${formatCurrency(peak)}` : ""}.`;
 }
 
 export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostSimulatorProps) {
@@ -107,6 +125,12 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
     enabled: Boolean(terms),
     placeholderData: keepPreviousData,
   });
+  // A failed recalculation drops the placeholder data, so the last good result is kept here and the
+  // scenario controls stay on screen for the tenant to change what they entered.
+  const [lastResult, setLastResult] = useState(query.data);
+  useEffect(() => {
+    if (query.data) setLastResult(query.data);
+  }, [query.data]);
   const save = useMutation({
     mutationFn: (next: FinancialOverrides) => api.saveFinancialOverrides(token, analysis.analysisId, next),
     onSuccess: ({ financialOverrides }) => {
@@ -118,10 +142,11 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
   if (!terms) {
     return <div className="cost-empty"><Info size={20} /><p>הבדיקה הזו נעשתה לפני שהוספנו את מחשבון העלויות. כדי לראות את עלות החוזה, בדקו אותו שוב.</p></div>;
   }
-  if (query.isLoading) return <LoadingState label="מחשבים את עלות החוזה" />;
-  if (query.error || !query.data) return <ErrorNotice message={messageForError(query.error, "לא הצלחנו לחשב את העלות.")} />;
+  const result = query.data ?? lastResult;
+  if (query.isLoading && !result) return <LoadingState label="מחשבים את עלות החוזה" />;
+  if (!result) return <ErrorNotice message="לא הצלחנו לחשב את עלות החוזה. נסו לרענן את הדף." />;
 
-  const { simulation, inputs, cpi } = query.data;
+  const { simulation, inputs, cpi } = result;
   const effective = { ...simulation.scenario, ...scenario };
   const update = (patch: Partial<CostScenario>) => setScenario((current) => ({ ...current, ...patch }));
   const term = inputs.leaseTermMonths ?? 0;
@@ -133,9 +158,13 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
     ? `לפי הלמ"ס: ${formatNumber(cpi.last12MonthsPercent)}% ב־12 החודשים שהסתיימו ב־${cpi.latestPeriod.split("-").reverse().join("/")}`
     : `הנחה של ${formatNumber(cpi.last12MonthsPercent)}% (נתוני הלמ"ס לא היו זמינים)`;
   const difference = simulation.totals.total - simulation.baselineTotal;
+  const monthRent = (month: CostMonth) => month.baseRent + month.increase + month.indexation;
+  const overBudgetMonth = simulation.months.find((month) => month.month === simulation.budget.firstMonthOverBudget);
+  const overTotalBudgetMonth = simulation.months.find((month) => month.month === simulation.budget.firstMonthOverTotalBudget);
 
   return (
     <div className="cost-simulator">
+      {query.error ? <ErrorNotice message="לא הצלחנו לחשב את התרחיש שבחרתם. המספרים שמוצגים הם מהחישוב הקודם. נסו לשנות את הערכים או לרענן את הדף." /> : null}
       {simulation.ready ? (
         <section className="cost-summary" aria-label="סיכום העלות">
           <article><Wallet size={20} /><div><span>סך כל העלות</span><strong>{formatCurrency(simulation.totals.total)}</strong><small>{simulation.months.filter((month) => month.phase === "TERM" || month.phase === "OPTION").length} חודשי מגורים</small></div></article>
@@ -151,8 +180,8 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
 
       {simulation.budget.firstMonthOverBudget !== null || simulation.budget.firstMonthOverTotalBudget !== null || simulation.increase.exceedsPreference ? (
         <div className="cost-alerts">
-          {simulation.budget.firstMonthOverBudget !== null ? <p><AlertTriangle size={16} /> בחודש {simulation.budget.firstMonthOverBudget} דמי השכירות יגיעו ל־{formatCurrency(simulation.budget.peakMonthlyRent)} ויעברו את התקציב שהגדרתם ({formatCurrency(simulation.budget.maxMonthlyRentIls)}).</p> : null}
-          {simulation.budget.firstMonthOverTotalBudget !== null && simulation.budget.maxMonthlyTotalCostIls !== null ? <p><AlertTriangle size={16} /> בחודש {simulation.budget.firstMonthOverTotalBudget} שכר הדירה והתשלומים השוטפים יגיעו ל־{formatCurrency(simulation.budget.peakMonthlyTotal)} ויעברו את התקציב החודשי הכולל שהגדרתם ({formatCurrency(simulation.budget.maxMonthlyTotalCostIls)}).</p> : null}
+          {overBudgetMonth ? <p><AlertTriangle size={16} /> {budgetAlert("דמי השכירות", "התקציב שהגדרתם", overBudgetMonth, monthRent(overBudgetMonth), simulation.budget.peakMonthlyRent, simulation.budget.maxMonthlyRentIls)}</p> : null}
+          {overTotalBudgetMonth && simulation.budget.maxMonthlyTotalCostIls !== null ? <p><AlertTriangle size={16} /> {budgetAlert("שכר הדירה והתשלומים השוטפים", "התקציב החודשי הכולל שהגדרתם", overTotalBudgetMonth, monthRent(overTotalBudgetMonth) + overTotalBudgetMonth.charges, simulation.budget.peakMonthlyTotal, simulation.budget.maxMonthlyTotalCostIls)}</p> : null}
           {simulation.increase.exceedsPreference ? <p><AlertTriangle size={16} /> העלייה השנתית בפועל היא {formatNumber(simulation.increase.effectiveAnnualPercent)}%, יותר מ־{formatNumber(simulation.increase.preferenceMax)}% שהגדרתם בהעדפות.</p> : null}
         </div>
       ) : null}
@@ -172,8 +201,8 @@ export function CostSimulator({ analysis, token, labelFor, onShowClause }: CostS
           <label className="scenario-control"><span>שוכר חלופי נמצא אחרי <b>{effective.replacementAfterMonths} חודשים</b></span><input type="range" min="0" max="6" step="1" value={effective.replacementAfterMonths} onChange={(event) => update({ replacementAfterMonths: Number(event.target.value) })} /></label>
         ) : null}
         <div className="scenario-pair">
-          <label className="scenario-number">איחור בפינוי<span><input type="number" min="0" max="60" value={effective.lateVacatingDays} onChange={(event) => update({ lateVacatingDays: Math.max(0, Number(event.target.value) || 0) })} /> ימים</span></label>
-          <label className="scenario-number">איחור בתשלום שכר דירה<span><input type="number" min="0" max="60" value={effective.latePaymentDays} onChange={(event) => update({ latePaymentDays: Math.max(0, Number(event.target.value) || 0) })} /> ימים</span></label>
+          <label className="scenario-number">איחור בפינוי<span><input type="number" min="0" max={MAX_LATE_DAYS} step="1" value={effective.lateVacatingDays} onChange={(event) => update({ lateVacatingDays: lateDays(event.target.value) })} /> ימים</span></label>
+          <label className="scenario-number">איחור בתשלום שכר דירה<span><input type="number" min="0" max={MAX_LATE_DAYS} step="1" value={effective.latePaymentDays} onChange={(event) => update({ latePaymentDays: lateDays(event.target.value) })} /> ימים</span></label>
         </div>
       </section>
 
