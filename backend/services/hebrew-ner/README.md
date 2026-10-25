@@ -12,4 +12,4 @@ docker run --rm -p 127.0.0.1:8001:8001 \
 ```
 
 The DictaBERT NER model is licensed CC BY 4.0. Preserve the model attribution in deployed
-product documentation: `dicta-il/dictabert-ner`, DICTA — The Israel Center for Text Analysis.
+product documentation: `dicta-il/dictabert-ner`, DICTA, The Israel Center for Text Analysis.

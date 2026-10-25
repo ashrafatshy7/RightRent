@@ -13,24 +13,24 @@ import { formatCurrency, formatDate } from "../lib/format";
 import type { AlignmentChange, ComparisonItem, ComparisonSide, ComparisonStatus, DiffPart, ProtectionStatus, Severity } from "../types/api";
 
 const STATUS_META: Record<ComparisonStatus, { label: string; tone: string; description: string }> = {
-  NEW_ISSUE: { label: "בעיה חדשה", tone: "danger", description: "סעיף חדש או שונה שיש בו בעיה" },
-  WORSENED: { label: "החמיר", tone: "danger", description: "הבעיה בסעיף חמורה יותר מבגרסה הקודמת" },
-  UNREQUESTED_CHANGE: { label: "שינוי שלא ביקשתם", tone: "warning", description: "הנוסח השתנה בסעיף שלא היה בו בעיה - כדאי לוודא שהשינוי מקובל עליכם" },
-  STILL_OPEN: { label: "עדיין פתוח", tone: "review", description: "הבעיה מהגרסה הקודמת לא טופלה" },
-  IMPROVED: { label: "השתפר", tone: "pending", description: "הבעיה פחות חמורה מבגרסה הקודמת" },
-  FIXED: { label: "תוקן", tone: "success", description: "הבעיה נפתרה או שהסעיף הבעייתי הוסר" },
+  NEW_ISSUE: { label: "בעיה חדשה", tone: "danger", description: "סעיף חדש או סעיף ששונה, ויש בו בעיה." },
+  WORSENED: { label: "החמיר", tone: "danger", description: "הבעיה בסעיף חמורה יותר מאשר בגרסה הקודמת." },
+  UNREQUESTED_CHANGE: { label: "שינוי שלא ביקשתם", tone: "warning", description: "המשכיר שינה סעיף שלא הייתה בו בעיה. כדאי לבדוק שהשינוי מקובל עליכם." },
+  STILL_OPEN: { label: "לא תוקן", tone: "review", description: "הבעיה מהגרסה הקודמת עדיין קיימת." },
+  IMPROVED: { label: "השתפר", tone: "pending", description: "הבעיה פחות חמורה מאשר בגרסה הקודמת." },
+  FIXED: { label: "תוקן", tone: "success", description: "הבעיה נפתרה, או שהסעיף הבעייתי הוסר." },
   UNCHANGED: { label: "ללא שינוי", tone: "pending", description: "" },
 };
 
 const STATUS_ORDER: ComparisonStatus[] = ["NEW_ISSUE", "WORSENED", "UNREQUESTED_CHANGE", "STILL_OPEN", "IMPROVED", "FIXED"];
 
 const CHANGE_LABELS: Record<AlignmentChange, string> = {
-  UNCHANGED: "ללא שינוי בנוסח",
-  MODIFIED: "הנוסח שונה",
+  UNCHANGED: "הנוסח לא השתנה",
+  MODIFIED: "הנוסח השתנה",
   ADDED: "סעיף חדש",
   REMOVED: "הסעיף הוסר",
-  SPLIT: "הסעיף פוצל",
-  MERGED: "סעיפים אוחדו",
+  SPLIT: "הסעיף חולק לכמה סעיפים",
+  MERGED: "כמה סעיפים אוחדו לאחד",
 };
 
 const SEVERITY_META: Record<Severity, { label: string; tone: string }> = {
@@ -40,9 +40,9 @@ const SEVERITY_META: Record<Severity, { label: string; tone: string }> = {
 };
 
 const PROTECTION_LABELS: Record<ProtectionStatus, { label: string; tone: string }> = {
-  COVERED: { label: "מכוסה", tone: "success" },
-  PARTIAL: { label: "חלקי", tone: "warning" },
-  MISSING: { label: "חסר", tone: "danger" },
+  COVERED: { label: "קיימת", tone: "success" },
+  PARTIAL: { label: "חלקית", tone: "warning" },
+  MISSING: { label: "חסרה", tone: "danger" },
 };
 
 export function ComparePage() {
@@ -70,9 +70,9 @@ export function ComparePage() {
     <div className="page-wrap compare-page">
       <PageHeader
         eyebrow="השוואת גרסאות"
-        title="מה המשכיר שינה"
-        description={`גרסה ${base.version} (${formatDate(base.createdAt)}) ← גרסה ${target.version} (${formatDate(target.createdAt)})`}
-        actions={<Link className="secondary-button" to={ROUTES.analysis(target.analysisId)}>לניתוח הגרסה החדשה <ArrowLeft size={17} /></Link>}
+        title="מה השתנה בחוזה"
+        description={`השוואה בין גרסה ${base.version} (${formatDate(base.createdAt)}) לגרסה ${target.version} (${formatDate(target.createdAt)}).`}
+        actions={<Link className="secondary-button" to={ROUTES.analysis(target.analysisId)}>לתוצאות הגרסה החדשה <ArrowLeft size={17} /></Link>}
       />
 
       <section className="top-summary">
@@ -94,7 +94,7 @@ export function ComparePage() {
         ))}
         {costDifference !== null ? (
           <article className={`compare-cost ${costDifference > 0 ? "cost-up" : costDifference < 0 ? "cost-down" : ""}`}>
-            <span>עלות החוזה</span>
+            <span>שינוי בעלות החוזה</span>
             <strong>{costDifference === 0 ? "ללא שינוי" : `${costDifference > 0 ? "+" : "−"}${formatCurrency(Math.abs(costDifference))}`}</strong>
             <small>{formatCurrency(cost.before!)} ← {formatCurrency(cost.after!)}</small>
           </article>
@@ -107,35 +107,35 @@ export function ComparePage() {
             <div><span className="eyebrow">סעיף מול סעיף</span><h2>{filter === "ALL" ? "כל השינויים" : STATUS_META[filter].label}</h2></div>
             {filter !== "ALL" ? <button className="ghost-button compact-button" type="button" onClick={() => setFilter("ALL")}>הצגת הכול</button> : null}
           </div>
-          {visible.length ? visible.map((item, index) => <ComparisonCard key={`${item.status}-${index}`} item={item} baseId={base.analysisId} targetId={target.analysisId} />) : <p className="compare-empty">אין שינויים בקטגוריה הזו.</p>}
+          {visible.length ? visible.map((item, index) => <ComparisonCard key={`${item.status}-${index}`} item={item} baseId={base.analysisId} targetId={target.analysisId} />) : <p className="compare-empty">אין שינויים מהסוג הזה.</p>}
           {unchanged.length ? (
             <details className="compare-unchanged">
-              <summary>{unchanged.length} סעיפים ללא שינוי מהותי</summary>
+              <summary>{unchanged.length} סעיפים שלא השתנו באופן מהותי</summary>
               <ul>{unchanged.map((item, index) => (
-                <li key={index}>{item.after?.label ?? item.before?.label}{item.renumberedOnly ? " · רק מספור ההפניות השתנה" : ""}{item.moved ? " · מיקום הסעיף השתנה" : ""}</li>
+                <li key={index}>{item.after?.label ?? item.before?.label}{item.renumberedOnly ? ", השתנה רק מספור הסעיפים" : ""}{item.moved ? ", הסעיף עבר למקום אחר בחוזה" : ""}</li>
               ))}</ul>
             </details>
           ) : null}
         </section>
 
         <aside className="compare-protections protection-panel">
-          <div className="section-heading"><div><span className="eyebrow">מעבר לסעיפים</span><h2>הגנות</h2></div></div>
-          {changedProtections.length ? null : <p className="compare-empty">מצב ההגנות זהה בשתי הגרסאות.</p>}
+          <div className="section-heading"><div><span className="eyebrow">רשימת בדיקה</span><h2>הגנות בחוזה</h2></div></div>
+          {changedProtections.length ? null : <p className="compare-empty">ההגנות זהות בשתי הגרסאות.</p>}
           <ul>
             {comparison.protections.map((protection) => (
               <li key={protection.protectionId} className={protection.before !== protection.after ? "changed" : ""}>
                 <span>{protection.title}</span>
                 <div>
-                  {protection.before ? <StatusBadge tone={PROTECTION_LABELS[protection.before].tone}>{PROTECTION_LABELS[protection.before].label}</StatusBadge> : "—"}
+                  {protection.before ? <StatusBadge tone={PROTECTION_LABELS[protection.before].tone}>{PROTECTION_LABELS[protection.before].label}</StatusBadge> : "אין"}
                   <ArrowLeft size={13} aria-label="השתנה ל" />
-                  {protection.after ? <StatusBadge tone={PROTECTION_LABELS[protection.after].tone}>{PROTECTION_LABELS[protection.after].label}</StatusBadge> : "—"}
+                  {protection.after ? <StatusBadge tone={PROTECTION_LABELS[protection.after].tone}>{PROTECTION_LABELS[protection.after].label}</StatusBadge> : "אין"}
                 </div>
               </li>
             ))}
           </ul>
         </aside>
       </div>
-      <div className="legal-disclaimer"><Info size={18} /><span>ההשוואה מבוססת על ניתוח אוטומטי של שתי הגרסאות ואינה ייעוץ משפטי. כדאי לקרוא את הגרסה החדשה במלואה לפני החתימה.</span></div>
+      <div className="legal-disclaimer"><Info size={18} /><span>ההשוואה נעשתה אוטומטית ואינה ייעוץ משפטי. כדאי לקרוא את הגרסה החדשה במלואה לפני החתימה.</span></div>
     </div>
   );
 }
@@ -145,7 +145,7 @@ function VersionCard({ label, version }: { label: string; version: { version: nu
     <div className="compare-version">
       <span>{label} · גרסה {version.version}</span>
       <strong title={version.fileName}>{version.fileName}</strong>
-      <small><b className="summary-red">{version.summary.critical}</b> קריטיים · <b className="summary-orange">{version.summary.warnings}</b> אזהרות</small>
+      <small><b className="summary-red">{version.summary.critical}</b> דורשים טיפול, <b className="summary-orange">{version.summary.warnings}</b> כדאי לבדוק</small>
     </div>
   );
 }
@@ -166,7 +166,7 @@ function DiffText({ parts, side }: { parts: DiffPart[]; side: "before" | "after"
 }
 
 function SideColumn({ title, side, item, analysisId }: { title: string; side: ComparisonSide | null; item: ComparisonItem; analysisId: string }) {
-  if (!side) return <div className="compare-side empty"><span className="eyebrow">{title}</span><p>{item.change === "ADDED" ? "הסעיף לא היה בגרסה הקודמת" : "הסעיף הוסר בגרסה החדשה"}</p></div>;
+  if (!side) return <div className="compare-side empty"><span className="eyebrow">{title}</span><p>{item.change === "ADDED" ? "הסעיף לא היה בגרסה הקודמת." : "הסעיף הוסר בגרסה החדשה."}</p></div>;
   return (
     <div className="compare-side">
       <div className="compare-side-head">
@@ -185,7 +185,7 @@ function ComparisonCard({ item, baseId, targetId }: { item: ComparisonItem; base
     <article className={`compare-item compare-${meta.tone}`}>
       <header>
         <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>
-        <span className="compare-change">{CHANGE_LABELS[item.change]}{item.moved ? <> · <MoveVertical size={12} /> הסעיף זז</> : null}</span>
+        <span className="compare-change">{CHANGE_LABELS[item.change]}{item.moved ? <> · <MoveVertical size={12} /> הסעיף עבר מקום</> : null}</span>
         {item.numberChanges.length ? (
           <span className="number-changes">{item.numberChanges.map((change, index) => <b key={index}>{change.before} ← {change.after}</b>)}</span>
         ) : null}

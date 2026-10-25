@@ -8,7 +8,7 @@ export function formatDate(value: string | null | undefined) {
 }
 
 export function formatNumber(value: number | null | undefined) {
-  return value === null || value === undefined ? "—" : numberFormatter.format(value);
+  return value === null || value === undefined ? "אין נתון" : numberFormatter.format(value);
 }
 
 export function formatCurrency(value: number) {
@@ -27,5 +27,5 @@ export function clauseLabel(clause: { clauseId: string; sectionLabel?: string; h
 }
 
 export function shortHash(value: string | null | undefined) {
-  return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "—";
+  return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "אין";
 }

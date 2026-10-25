@@ -56,13 +56,13 @@ export function AdminLawsPage() {
   const filtered = filter === "ALL" ? sorted : sorted.filter((law) => law.status === filter);
   const selected = laws.find((law) => law.israelLawId === selectedId) ?? null;
 
-  if (lawsQuery.isLoading || readinessQuery.isLoading) return <LoadingState label="טוענים את מרכז החקיקה" />;
+  if (lawsQuery.isLoading || readinessQuery.isLoading) return <LoadingState label="טוענים את מאגר החוקים" />;
   const pageError = lawsQuery.error ?? readinessQuery.error;
   if (pageError) return <ErrorNotice message={messageForError(pageError)} />;
 
   return (
     <div className="page-wrap admin-page">
-      <PageHeader eyebrow="בקרת מקורות והרשאות" title="מרכז החקיקה" description="13 חוקים, גרסה אחת פעילה לכל חוק, ותיעוד מלא של כל החלטת אימות." actions={<button className="secondary-button" type="button" disabled={sync.isPending} onClick={() => { setNotice(null); sync.mutate(); }}><RefreshCw className={sync.isPending ? "spinning" : ""} size={17} />{sync.isPending ? "בודקים מקורות…" : "בדיקה עכשיו"}</button>} />
+      <PageHeader eyebrow="בקרת מקורות והרשאות" title="ניהול חוקים" description="כאן בודקים ומאשרים את הנוסח של 13 החוקים שהמערכת משתמשת בהם. לכל חוק יש גרסה פעילה אחת, וכל אישור נשמר." actions={<button className="secondary-button" type="button" disabled={sync.isPending} onClick={() => { setNotice(null); sync.mutate(); }}><RefreshCw className={sync.isPending ? "spinning" : ""} size={17} />{sync.isPending ? "בודקים עדכונים…" : "בדיקת עדכונים"}</button>} />
       {sync.error ? <ErrorNotice message={messageForError(sync.error)} /> : null}
       {notice ? <div className="success-notice"><CheckCircle2 size={18} />{notice}</div> : null}
 
@@ -90,7 +90,7 @@ export function AdminLawsPage() {
               <button className="law-row" type="button" role="row" key={law.israelLawId} onClick={() => setSelectedId(law.israelLawId)}>
                 <span className="law-identity"><i>{String(law.israelLawId).slice(-3)}</i><span><strong>{law.lawName}</strong><small>IsraelLaw {law.israelLawId}</small></span></span>
                 <span><StatusBadge tone={meta.tone}>{meta.label}</StatusBadge></span>
-                <code>{revision || "—"}</code><span>{formatNumber(sectionCount)}</span><span>{formatDate(law.checkedAt)}</span><span className="row-arrow"><ArrowUpLeft size={17} /></span>
+                <code>{revision || "אין"}</code><span>{formatNumber(sectionCount)}</span><span>{formatDate(law.checkedAt)}</span><span className="row-arrow"><ArrowUpLeft size={17} /></span>
               </button>
             );
           })}
@@ -157,19 +157,19 @@ function LawReviewPanel({ law, reviewer, token, onClose, onApproved }: { law: La
           <section className="source-links"><a href={law.knessetUrl} target="_blank" rel="noreferrer"><span><SearchCheck size={20} /></span><div><strong>מאגר החקיקה של הכנסת</strong><small>פרסומים, תיקונים וקשרי חקיקה</small></div><ExternalLink size={16} /></a><a href={permanentWikiUrl} target="_blank" rel="noreferrer"><span><BookCheck size={20} /></span><div><strong>הגרסה המאוחדת הקפואה</strong><small>revision {law.candidateRevisionId ?? law.observedRevisionId}</small></div><ExternalLink size={16} /></a></section>
           {law.error ? <div className="law-error"><FileWarning size={20} /><div><strong>הסנכרון נעצר</strong><p>{law.error}</p></div></div> : null}
           {unmatched && canApprove ? <div className="law-error"><AlertTriangle size={20} /><div><strong>שינוי ללא תיקון רשמי</strong><p>הנוסח בוויקיטקסט השתנה בלי פרסום חדש בכנסת ובלי תיקון מאושר שנכנס לתוקף. יש להשוות את הסעיפים שהשתנו מול הנוסח הרשמי לפני האישור.</p></div></div> : null}
-          {law.activeRevisionId !== null ? <section className="candidate-facts"><h3>הגרסה שמשמשת לניתוח</h3><div className="fact-grid"><Fact label="Revision" value={String(law.activeRevisionId)} /><Fact label="מספר סעיפים" value={formatNumber(law.activeSectionCount)} /></div><p className="verification-note">אושרה על ידי {law.verifiedBy ?? "—"} · {formatDate(law.verifiedAt)}</p>{law.verificationReference ? <p className="verification-note" dir="ltr">{law.verificationReference}</p> : null}</section> : null}
-          <section className="candidate-facts"><h3>טביעת האצבע של המועמד</h3><div className="fact-grid"><Fact label="Revision" value={String(law.candidateRevisionId ?? "—")} /><Fact label="מספר סעיפים" value={formatNumber(law.candidateSectionCount)} /><Fact label="Content hash" value={shortHash(law.candidateContentHash)} title={law.candidateContentHash ?? undefined} /><Fact label="Sections hash" value={shortHash(law.candidateSectionsHash)} title={law.candidateSectionsHash ?? undefined} /></div></section>
-          <section className="section-manifest"><div><h3>Manifest הסעיפים</h3><span>{law.candidateSectionKeys.length} מזהים</span></div>{law.candidateSectionKeys.length ? <details><summary>פתיחת הרשימה המלאה</summary><ol>{law.candidateSectionKeys.map((key) => <li key={key}><code>{key}</code></li>)}</ol></details> : <p>אין רשימת סעיפים זמינה למועמד הזה.</p>}</section>
+          {law.activeRevisionId !== null ? <section className="candidate-facts"><h3>הגרסה שמשמשת לניתוח</h3><div className="fact-grid"><Fact label="Revision" value={String(law.activeRevisionId)} /><Fact label="מספר סעיפים" value={formatNumber(law.activeSectionCount)} /></div><p className="verification-note">אושרה על ידי {law.verifiedBy ?? "לא ידוע"} · {formatDate(law.verifiedAt)}</p>{law.verificationReference ? <p className="verification-note" dir="ltr">{law.verificationReference}</p> : null}</section> : null}
+          <section className="candidate-facts"><h3>פרטי הגרסה שממתינה לאישור</h3><div className="fact-grid"><Fact label="Revision" value={String(law.candidateRevisionId ?? "אין")} /><Fact label="מספר סעיפים" value={formatNumber(law.candidateSectionCount)} /><Fact label="Content hash" value={shortHash(law.candidateContentHash)} title={law.candidateContentHash ?? undefined} /><Fact label="Sections hash" value={shortHash(law.candidateSectionsHash)} title={law.candidateSectionsHash ?? undefined} /></div></section>
+          <section className="section-manifest"><div><h3>רשימת הסעיפים</h3><span>{law.candidateSectionKeys.length} מזהים</span></div>{law.candidateSectionKeys.length ? <details><summary>הצגת הרשימה המלאה</summary><ol>{law.candidateSectionKeys.map((key) => <li key={key}><code>{key}</code></li>)}</ol></details> : <p>אין רשימת סעיפים לגרסה הזו.</p>}</section>
           {canApprove ? (
             <form className="approval-form" onSubmit={submit}>
-              <div className="approval-heading"><span><Fingerprint size={20} /></span><div><h3>תיעוד האימות</h3><p>הערכים הטכניים נלקחים אוטומטית מהמועמד ואינם ניתנים לעריכה.</p></div></div>
+              <div className="approval-heading"><span><Fingerprint size={20} /></span><div><h3>אישור הגרסה</h3><p>הפרטים הטכניים נלקחים אוטומטית מהגרסה, ואי אפשר לערוך אותם.</p></div></div>
               {approval.error ? <ErrorNotice message={messageForError(approval.error)} /> : null}
               <label className="field-label">שם הבודק<input required minLength={2} maxLength={200} value={verifiedBy} onChange={(event) => setVerifiedBy(event.target.value)} /></label>
               <label className="field-label">מקורות והערות אימות<textarea required minLength={5} maxLength={2000} rows={4} value={verificationReference} onChange={(event) => setVerificationReference(event.target.value)} /></label>
               <label className={`confirmation-check ${confirmed ? "checked" : ""}`}><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span><CheckCircle2 size={19} /></span><div><strong>בדקתי שהגרסה מלאה ועדכנית</strong><small>השוויתי את רשימת התיקונים, הסעיפים והגרסה הקפואה למקורות הרשומים.</small></div></label>
-              <button className="primary-button approval-button" type="submit" disabled={!confirmed || !verifiedBy.trim() || !verificationReference.trim() || approval.isPending}>{approval.isPending ? "מפעילים את הגרסה…" : "אישור והפיכת החוק לפעיל"}<ShieldCheck size={18} /></button>
+              <button className="primary-button approval-button" type="submit" disabled={!confirmed || !verifiedBy.trim() || !verificationReference.trim() || approval.isPending}>{approval.isPending ? "מאשרים…" : "אישור הגרסה והפעלתה"}<ShieldCheck size={18} /></button>
             </form>
-          ) : <div className="approval-blocked"><AlertTriangle size={19} /><span>{law.status === "FAILED" ? "יש לתקן את שגיאת החילוץ ולסנכרן מחדש לפני אישור." : law.status === "ACTIVE" ? "הגרסה הזו כבר פעילה ומאומתת." : "אין כרגע מועמד שלם שניתן לאשר."}</span></div>}
+          ) : <div className="approval-blocked"><AlertTriangle size={19} /><span>{law.status === "FAILED" ? "צריך לתקן את השגיאה ולבדוק עדכונים שוב לפני האישור." : law.status === "ACTIVE" ? "הגרסה הזו כבר פעילה ומאומתת." : "אין כרגע גרסה מלאה שאפשר לאשר."}</span></div>}
         </div>
       </aside>
     </div>

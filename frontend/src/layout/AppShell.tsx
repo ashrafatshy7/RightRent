@@ -13,16 +13,16 @@ import { BrandMark } from "../components/BrandMark";
 import { ROUTES } from "../config/app";
 
 const tenantNavigation = [
-  { to: ROUTES.app, label: "תמונת מצב", icon: Home, end: true },
+  { to: ROUTES.app, label: "ראשי", icon: Home, end: true },
   { to: ROUTES.upload, label: "בדיקת חוזה", icon: FileSearch },
-  { to: ROUTES.preferences, label: "העדפות שכירות", icon: Settings2 },
-  { to: ROUTES.history, label: "היסטוריה", icon: History },
+  { to: ROUTES.preferences, label: "העדפות שכירות", shortLabel: "העדפות", icon: Settings2 },
+  { to: ROUTES.history, label: "החוזים שלי", icon: History },
 ] as const;
 
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigation = user?.role === "ADMIN"
-    ? [...tenantNavigation, { to: ROUTES.adminLaws, label: "מרכז החקיקה", icon: ClipboardCheck }]
+    ? [...tenantNavigation, { to: ROUTES.adminLaws, label: "ניהול חוקים", icon: ClipboardCheck }]
     : tenantNavigation;
 
   return (
@@ -33,7 +33,7 @@ export function AppShell() {
           {navigation.map(({ to, label, icon: Icon, ...item }) => (
             <NavLink key={to} to={to} end={"end" in item ? item.end : false}>
               <Icon size={19} />
-              <span>{label}</span>
+              {"shortLabel" in item ? <><span className="nav-label-full">{label}</span><span className="nav-label-short">{item.shortLabel}</span></> : <span>{label}</span>}
             </NavLink>
           ))}
         </nav>

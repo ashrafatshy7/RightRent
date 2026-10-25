@@ -295,7 +295,7 @@ function PdfPage({
               tabIndex={primary ? 0 : -1}
               aria-hidden={primary ? undefined : true}
               aria-pressed={primary ? highlight.clauseId === selectedClauseId : undefined}
-              aria-label={primary ? `${highlight.label}: ${highlight.title} — ${highlight.severityLabel}` : undefined}
+              aria-label={primary ? `${highlight.label}: ${highlight.title}, ${highlight.severityLabel}` : undefined}
               onClick={() => onSelect(highlight.clauseId)}
               onMouseEnter={() => onHover(highlight.clauseId)}
               onMouseLeave={() => onHover(null)}

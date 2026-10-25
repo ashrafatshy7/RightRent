@@ -25,7 +25,7 @@ const queryClient = new QueryClient({
 
 function ProtectedRoute() {
   const { token, user, isRestoring } = useAuth();
-  if (isRestoring) return <div className="full-page-loader"><LoadingState label="משחזרים את החשבון" /></div>;
+  if (isRestoring) return <div className="full-page-loader"><LoadingState label="טוענים את החשבון" /></div>;
   if (!token || !user) return <Navigate replace to={ROUTES.login} />;
   return <AppShell />;
 }
