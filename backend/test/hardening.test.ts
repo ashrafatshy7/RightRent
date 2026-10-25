@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
 import {
   redactClauses,
@@ -9,6 +11,7 @@ import {
 } from "../src/modules/analyses/protection-checklist.service.js";
 import {
   extractClausesFromPlainText,
+  extractPdf,
   locatedLinesFromOcrBlocks,
   pageLines,
   type PdfTextItem,
@@ -192,6 +195,71 @@ test("logical-order pages keep the producer's order, including left-to-right lin
     "ועד יום 31 בדצמבר",
     "עמוד 1",
   ]);
+});
+
+test("filled-in form values drawn after the template go back into the blanks they were typed over", () => {
+  const lines = pageLines([
+    placedItem("תקופת השכירות הנה למשך ____ חודשים, החל מיום ______", 100, 400, 600, true),
+    placedItem("דמי השכירות ישולמו כדלקמן:", 300, 200, 580, true),
+    placedItem("סיום", 450, 50, 560, true),
+    // The form filler's layer, at the end of the content stream and a little off the template's
+    // baseline.
+    placedItem("12", 330, 11, 602),
+    placedItem("1.11.2026", 120, 44, 602, true),
+    // A filled text box with no template line under it.
+    placedItem("12 תשלומים של 5,000 ₪", 200, 250, 570, true),
+  ], 1);
+  assert.deepEqual(lines.map((line) => line.text), [
+    "תקופת השכירות הנה למשך 12 חודשים, החל מיום 1.11.2026",
+    "דמי השכירות ישולמו כדלקמן:",
+    "12 תשלומים של 5,000 ₪",
+    "סיום",
+  ]);
+  // The values stay highlightable where they are on the page.
+  assert.deepEqual(lines[0]!.locations.map((location) => location.bbox[0]), [100, 330, 120]);
+});
+
+test("a later run of lines with no blank under it keeps the producer's order", () => {
+  const lines = pageLines([
+    placedItem("המשכיר משכיר לשוכרת דירה", 300, 200, 600, true),
+    placedItem("דמי השכירות 5,000 ש״ח", 300, 200, 580, true),
+    placedItem("הערה בשוליים", 40, 60, 600, true),
+  ], 1);
+  assert.deepEqual(lines.map((line) => line.text), [
+    "המשכיר משכיר לשוכרת דירה",
+    "דמי השכירות 5,000 ש״ח",
+    "הערה בשוליים",
+  ]);
+});
+
+test("a filled-in rental form PDF reads with every typed value inside its clause", async () => {
+  const { clauses } = await extractPdf(
+    await readFile(path.resolve("test/fixtures/filled-rental-contract.pdf"))
+  );
+  const text = clauses.map((clause) => clause.text).join("\n");
+
+  for (const expected of [
+    "שנערך ונחתם בפתח תקווה ביום 25 לחודש 10 שנת .2026",
+    "משה כהן ת.ז 012345674",
+    "דירה בת 4 חדרים",
+    "כגוש 6393 חלקה 112 תת חלקה 8",
+    "לתקופה של 12 חודשים",
+    "תקופת השכירות הנה למשך 12 חודשים בלבד, החל מיום 1.11.2026 וכלה ביום 1.11.2027",
+    "בסכום השווה ל-( ₪ 5,000",
+    "סך של 200 ש\"ח עבור כל יום של איחור",
+    "טל: 052-7654321 / 050-1234567",
+  ]) {
+    assert.ok(text.includes(expected), `missing: ${expected}`);
+  }
+
+  // The payment schedule is a filled text box: it belongs to 6.2, not to the end of page 3.
+  const schedule = clauses.find((clause) => clause.text.includes("ישולמו בתשלומים כדלקמן"));
+  assert.match(schedule!.text, /12 תשלומים חודשיים של ₪ 5,000, מראש/u);
+  assert.ok(!/_{3,}/u.test(text), "every blank of this form was filled in");
+  assert.ok(
+    clauses.every((clause) => /[\u05D0-\u05EA]/u.test(clause.text)),
+    "no clause is made only of stray values"
+  );
 });
 
 test("a wrapped line that starts with a year or an amount does not open a new clause", () => {

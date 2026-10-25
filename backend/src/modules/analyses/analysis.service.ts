@@ -33,6 +33,7 @@ import {
 } from "./ai-providers.js";
 import { traceAnalysis, traceAnalysisFailure } from "./analysis-logger.js";
 import { redactClauses } from "./anonymization.service.js";
+import { reconcileBlankFieldFindings } from "./blank-fields.service.js";
 import { categoryForAssessment, classifyClause, isSubstantiveClause, resolveClauseQuote } from "./classification.js";
 import { linkClauses, type ClauseGraph, type ClauseLink } from "./clause-linking.service.js";
 import {
@@ -583,10 +584,12 @@ export async function analyzeContract(
     const financialPromise = financialTerms(redaction.clauses, graph, store, scope);
     const [verdicts, protections, financial] = await Promise.all([verdictsPromise, protectionsPromise, financialPromise]);
     const findings = withRelatedFindingIds(
-      analyzableClauses
-        .map((clause, index) =>
-          toFinding(clause, verdicts[index]!.verdict, verdicts[index]!.references, verdicts[index]!.checks, verdicts[index]!.links))
-        .sort(byPriority),
+      reconcileBlankFieldFindings(
+        analyzableClauses.map((clause, index) =>
+          toFinding(clause, verdicts[index]!.verdict, verdicts[index]!.references, verdicts[index]!.checks, verdicts[index]!.links)),
+        redaction.clauses,
+        financial,
+      ).sort(byPriority),
     );
     const incompleteProtections = protections.filter((item) => item.status !== "COVERED");
     const analysisMs = Math.round(performance.now() - analysisStarted);

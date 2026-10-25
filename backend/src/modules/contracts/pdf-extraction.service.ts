@@ -401,6 +401,214 @@ function writesVisualOrder(lines: PlacedItem[][]) {
   return visual >= 2 && visual > logical;
 }
 
+type LineWord = {
+  text: string;
+  box: ClauseLocation["bbox"];
+};
+
+type WordedLine = {
+  y: number;
+  size: number;
+  hebrew: boolean;
+  words: LineWord[];
+  // Boxes of filled-in values written into a blank of one of the words.
+  valueBoxes: ClauseLocation["bbox"][];
+};
+
+const BLANK = /_{3,}/gu;
+const COVERED_WORD_SHARE = 0.8;
+
+function hasBlank(text: string) {
+  return /_{3,}/u.test(text);
+}
+
+function baselineTolerance(left: WordedLine, right: WordedLine) {
+  return NEW_LINE_BASELINE_EM * Math.max(left.size, right.size);
+}
+
+// Splits a page into runs of lines going down the page. A new run starts wherever the content
+// stream jumps back up.
+function downwardRuns(lines: WordedLine[]) {
+  const runs: WordedLine[][] = [];
+
+  for (const line of lines) {
+    const run = runs[runs.length - 1];
+    const previous = run?.[run.length - 1];
+
+    if (run && previous && line.y <= previous.y + baselineTolerance(previous, line)) {
+      run.push(line);
+    } else {
+      runs.push([line]);
+    }
+  }
+
+  return runs;
+}
+
+function templateLineFor(line: WordedLine, template: WordedLine[]) {
+  let closest: WordedLine | undefined;
+
+  for (const candidate of template) {
+    const distance = Math.abs(candidate.y - line.y);
+
+    if (
+      distance <= baselineTolerance(candidate, line) &&
+      (!closest || distance < Math.abs(closest.y - line.y))
+    ) {
+      closest = candidate;
+    }
+  }
+
+  return closest;
+}
+
+function horizontalOverlap(
+  [leftX, , leftWidth]: ClauseLocation["bbox"],
+  [rightX, , rightWidth]: ClauseLocation["bbox"],
+) {
+  return Math.max(
+    0,
+    Math.min(leftX + leftWidth, rightX + rightWidth) - Math.max(leftX, rightX)
+  );
+}
+
+// Where a blank sits on the page, estimated from its place in the word's text. Hebrew runs, and
+// neutral runs on a Hebrew line, read from the right edge of the word's box.
+function blankCenter(word: LineWord, start: number, end: number, rightToLeftLine: boolean) {
+  const [x, , width] = word.box;
+  const share = (start + end) / 2 / Math.max(word.text.length, 1);
+  const rightToLeft =
+    HEBREW_LETTER.test(word.text) ||
+    (rightToLeftLine && !/[A-Za-z0-9]/u.test(word.text));
+
+  return rightToLeft ? x + width - share * width : x + share * width;
+}
+
+function boxCenter([x, , width]: ClauseLocation["bbox"]) {
+  return x + width / 2;
+}
+
+function fillTemplateLine(line: WordedLine, values: LineWord[]) {
+  // A signature line is only underscores, so the names typed on it decide its direction.
+  const rightToLeft =
+    line.hebrew ||
+    values.some((value) => HEBREW_LETTER.test(value.text));
+  const remaining: LineWord[] = [];
+
+  // A value typed over printed words (a white-out over a printed year, say) replaces them.
+  for (const value of values) {
+    const covered = line.words.filter((word) =>
+      word.text &&
+      !hasBlank(word.text) &&
+      horizontalOverlap(word.box, value.box) >= COVERED_WORD_SHARE * word.box[2]
+    );
+
+    if (!covered.length) {
+      remaining.push(value);
+      continue;
+    }
+
+    covered.forEach((word, index) => {
+      word.text = index === 0 ? value.text : "";
+      if (index === 0) word.box = value.box;
+    });
+  }
+
+  const ordered = remaining.sort((left, right) =>
+    rightToLeft
+      ? right.box[0] + right.box[2] - (left.box[0] + left.box[2])
+      : left.box[0] - right.box[0]
+  );
+
+  const blanks = line.words.flatMap((word) =>
+    [...word.text.matchAll(BLANK)].map((match) => ({
+      word,
+      start: match.index,
+      end: match.index + match[0].length,
+      center: blankCenter(word, match.index, match.index + match[0].length, rightToLeft),
+      values: [] as string[],
+    }))
+  );
+
+  if (!blanks.length) {
+    line.words.push(...ordered);
+    return;
+  }
+
+  // As many values as blanks: they fill the blanks in reading order. Otherwise each value goes to
+  // the blank nearest to it, which lets two names share one signature line.
+  ordered.forEach((value, index) => {
+    const blank = ordered.length === blanks.length
+      ? blanks[index]!
+      : blanks.reduce((nearest, candidate) =>
+          Math.abs(candidate.center - boxCenter(value.box)) <
+            Math.abs(nearest.center - boxCenter(value.box))
+            ? candidate
+            : nearest
+        );
+
+    blank.values.push(value.text);
+    line.valueBoxes.push(value.box);
+  });
+
+  // From the last blank back, so the offsets of earlier blanks in the same word stay valid.
+  for (const blank of [...blanks].reverse()) {
+    if (!blank.values.length) continue;
+
+    blank.word.text =
+      `${blank.word.text.slice(0, blank.start)} ${blank.values.join(" ")} ${blank.word.text.slice(blank.end)}`;
+  }
+}
+
+// Filled-in PDF forms often draw the typed values after the whole template, so in content order
+// they end up as stray lines at the bottom of the page, cut off from the clause they complete. A
+// later run of lines whose values land on a template line with a blank is put back in place: each
+// value into the template line it sits on, and a line with no template line under it (a filled
+// text box) between the template lines above and below it.
+function placeFilledValues(lines: WordedLine[]): WordedLine[] {
+  const runs = downwardRuns(lines);
+  if (runs.length < 2) return lines;
+
+  const template = runs.reduce((longest, run) =>
+    run.length > longest.length ? run : longest
+  );
+
+  const filledRuns = new Set(
+    runs.filter((run) =>
+      run !== template &&
+      run.some((line) => {
+        const target = templateLineFor(line, template);
+        return target?.words.some((word) => hasBlank(word.text));
+      })
+    )
+  );
+
+  if (!filledRuns.size) return lines;
+
+  const values = new Map<WordedLine, LineWord[]>();
+  const placed = [...template];
+
+  for (const run of filledRuns) {
+    for (const line of run) {
+      const target = templateLineFor(line, template);
+
+      if (target) {
+        values.set(target, [...(values.get(target) ?? []), ...line.words]);
+        continue;
+      }
+
+      const below = placed.findIndex((candidate) => candidate.y < line.y);
+      placed.splice(below === -1 ? placed.length : below, 0, line);
+    }
+  }
+
+  values.forEach((words, target) => fillTemplateLine(target, words));
+
+  return runs.flatMap((run) =>
+    run === template ? placed : filledRuns.has(run) ? [] : run
+  );
+}
+
 export function pageLines(
   items: PdfTextItem[],
   page: number
@@ -408,19 +616,30 @@ export function pageLines(
   const lines = contentLines(items);
   const visual = writesVisualOrder(lines);
 
-  return lines.flatMap((line) => {
+  const wordedLines = lines.map((line): WordedLine => {
+    const hebrew = line.some((item) =>
+      HEBREW_LETTER.test(item.str)
+    );
+
     const rightToLeft =
       visual &&
-      (
-        line.some((item) =>
-          HEBREW_LETTER.test(item.str)
-        ) ||
-        contentOrderWords(line).length === 1
-      );
+      (hebrew || contentOrderWords(line).length === 1);
 
     const words = rightToLeft
       ? rightToLeftWords(line)
       : contentOrderWords(line);
+
+    return {
+      y: line[0]!.y,
+      size: Math.max(...line.map((item) => item.size)),
+      hebrew,
+      words: words.map(({ text, box }) => ({ text, box })),
+      valueBoxes: [],
+    };
+  });
+
+  return placeFilledValues(wordedLines).flatMap((line) => {
+    const words = line.words.filter((word) => word.text);
 
     const text = words
       .map((word) => word.text)
@@ -431,10 +650,10 @@ export function pageLines(
     return text
       ? [{
           text,
-          locations: words.map((word) => ({
-            page,
-            bbox: word.box,
-          })),
+          locations: [
+            ...words.map((word) => word.box),
+            ...line.valueBoxes,
+          ].map((bbox) => ({ page, bbox })),
         }]
       : [];
   });
