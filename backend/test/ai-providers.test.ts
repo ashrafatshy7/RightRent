@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { ContractClause, LawChunk, TenantPreferences } from "../src/domain/models.js";
-import type { ProtectionChecklistItem } from "../src/modules/analyses/protection-checklist.service.js";
+import type { ProtectionAnalysisContext } from "../src/modules/analyses/ai-providers.js";
 
 process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
 
-const { analyzeProtectionsWithClaude, analyzeWithClaude } = await import(
+const { discoverProtectionsWithClaude, verifyProtectionsWithClaude, analyzeWithClaude } = await import(
   "../src/modules/analyses/ai-providers.js"
 );
 
@@ -86,7 +86,14 @@ test("Anthropic analysis requests stream Sonnet 5 JSON-schema calls without samp
     hebrewVerdict,
     {
       items: [{
-        protectionId: "PROTECTION-1",
+        protectionId: "RR-GAP-SHARED-METER-ALLOCATION",
+        title: "אופן חלוקת חשבון משותף",
+        basis: "CONTRACT_RISK",
+        confidence: "medium",
+        applicability: "החוזה כולל תשלום משותף בלי פירוט",
+        scenario: "ייתכן ויכוח על חלקו של השוכר בחשבון",
+        evidence: [{ clauseId: clause.id, quote: clause.text }],
+        preferenceKeys: [],
         status: "MISSING",
         explanation: "ההגנה חסרה",
         relevantClauseIds: [clause.id],
@@ -101,15 +108,7 @@ test("Anthropic analysis requests stream Sonnet 5 JSON-schema calls without samp
   });
 
   const verdict = await analyzeWithClaude(clause, [lawSection], preferences);
-  const checklist: ProtectionChecklistItem = {
-    protectionId: "PROTECTION-1",
-    title: "הגנת בדיקה",
-    description: "תיאור",
-    suggestedText: "נוסח מוצע",
-    covered: /מכוסה/u,
-    partial: /חלקי/u,
-  };
-  await analyzeProtectionsWithClaude([clause], [checklist], [lawSection]);
+  await discoverProtectionsWithClaude({ clauses: [clause], preferences, facts: [], relations: [] }, [lawSection]);
 
   assert.deepEqual(verdict.usage, { inputTokens: 120, outputTokens: 42 });
   assert.equal(requests.length, 2);
@@ -134,8 +133,8 @@ test("Anthropic analysis requests stream Sonnet 5 JSON-schema calls without samp
 
   const protectionSystem = String(requests[1]!.system);
   assert.match(protectionSystem, /clear, fluent Hebrew/u);
-  assert.match(protectionSystem, /Use COVERED only when the contract expressly provides the complete protection/u);
-  assert.match(protectionSystem, /do not infer coverage from silence/u);
+  assert.match(protectionSystem, /no predefined protection checklist/u);
+  assert.match(protectionSystem, /entire subjects absent from the contract/u);
 });
 
 test("Anthropic analysis rejects user-facing text that is not in Hebrew", async (context) => {
@@ -231,4 +230,132 @@ test("related clauses are supplied as untrusted context and only supplied IDs su
   answers.push(hebrewVerdict);
   await analyzeWithClaude(clause, [lawSection], preferences);
   assert.doesNotMatch(String((requests[2]!.messages as Array<{ content: string }>)[0]!.content), /RELATED_CONTRACT_CLAUSES/u);
+});
+
+const protectionContext: ProtectionAnalysisContext = {
+  clauses: [{ id: "C101", text: "חשבון החשמל משותף לשלוש יחידות והשוכר ישלם את חלקו.", locations: [] }],
+  preferences: { ...preferences, earlyExitRequired: true, additionalNotes: "נדרשת אפשרות לעבור דירה בגלל העבודה" },
+  facts: [],
+  relations: [{ clauseId: "C101", relatedClauseId: "C102", relation: "REFERENCES" }],
+};
+const sharedMeterGap = {
+  protectionId: "RR-GAP-SHARED-METER-ALLOCATION",
+  title: "בדיקת החלק בחשבון המשותף",
+  status: "PARTIAL" as const,
+  basis: "CONTRACT_RISK" as const,
+  confidence: "medium" as const,
+  applicability: "החוזה מחייב תשלום על חשמל משותף בלי להגדיר את החלוקה",
+  scenario: "אם צריכת השכנים תגדל, השוכר עלול לשלם יותר בלי יכולת לבדוק את חלקו",
+  explanation: "לא מוגדרת דרך לחשב ולבדוק את חלקו של השוכר בחשבון",
+  relevantClauseIds: ["C101"],
+  evidence: [{ clauseId: "C101", quote: protectionContext.clauses[0]!.text }],
+  legalReferenceIds: [],
+  preferenceKeys: [],
+  suggestedText: "הצדדים יסכימו בכתב על אופן חלוקת החשבון ועל האפשרות לעיין בחשבונות ובקריאות המונה.",
+};
+
+test("discovery accepts a novel protection without an eight-item catalog and sends the tenant context", async (context) => {
+  let request: Record<string, unknown> = {};
+  mockFetch(context, async (init) => {
+    request = JSON.parse(String(init?.body));
+    return claudeStream({ items: [sharedMeterGap] });
+  });
+  const report = await discoverProtectionsWithClaude(protectionContext, [lawSection]);
+  assert.equal(report.length, 1);
+  assert.equal(report[0]!.protectionId, sharedMeterGap.protectionId);
+  assert.equal(report[0]!.title, sharedMeterGap.title);
+  const content = (request.messages as Array<{ content: string }>)[0]!.content;
+  assert.ok(content.includes(JSON.stringify(protectionContext.preferences)));
+  assert.ok(content.includes(JSON.stringify(protectionContext.relations)));
+  assert.ok(content.includes(protectionContext.clauses[0]!.text));
+  assert.doesNotMatch(content, /CHECKLIST=/u);
+});
+
+test("verification can resolve a candidate using a different clause and removes its proposed addition", async (context) => {
+  const resolving = { id: "C102", text: "חלקו של השוכר ייקבע לפי מונה נפרד וחשבונות החשמל יימסרו לעיונו.", locations: [] };
+  let request: Record<string, unknown> = {};
+  mockFetch(context, async (init) => {
+    request = JSON.parse(String(init?.body));
+    return claudeStream({ items: [{ ...sharedMeterGap, status: "COVERED", relevantClauseIds: ["C102"],
+      evidence: [{ clauseId: "C102", quote: resolving.text }], explanation: "סעיף אחר קובע מדידה נפרדת וזכות לעיין בחשבונות" }] });
+  });
+  const report = await verifyProtectionsWithClaude({ ...protectionContext, clauses: [...protectionContext.clauses, resolving] }, [sharedMeterGap], [lawSection]);
+  assert.equal(report[0]!.status, "COVERED");
+  assert.equal(report[0]!.suggestedText, undefined);
+  assert.deepEqual(report[0]!.relevantClauseIds, ["C102"]);
+  const content = (request.messages as Array<{ content: string }>)[0]!.content;
+  assert.ok(content.includes(resolving.text));
+  assert.match(content, /<UNTRUSTED_CANDIDATES>/u);
+  assert.match(String(request.system), /Independently challenge every candidate/u);
+});
+
+test("an unavailable annex stays UNKNOWN and cannot produce a contract addition", async (context) => {
+  const annexContext = { ...protectionContext, clauses: [{ id: "C103", text: "רשימת הציוד ומצבו מפורטים בנספח א.", locations: [] }] };
+  mockFetch(context, async () => claudeStream({ items: [{ ...sharedMeterGap,
+    protectionId: "RR-GAP-EQUIPMENT-CONDITION", title: "בירור מצב הציוד", status: "UNKNOWN",
+    explanation: "נספח הציוד לא צורף ולכן אי אפשר לקבוע אם מצב הציוד מתועד",
+    relevantClauseIds: ["C103"], evidence: [{ clauseId: "C103", quote: annexContext.clauses[0]!.text }],
+  }] }));
+  const report = await discoverProtectionsWithClaude(annexContext, []);
+  assert.equal(report[0]!.status, "UNKNOWN");
+  assert.equal(report[0]!.suggestedText, undefined);
+});
+
+test("discovery can report an entirely absent subject and can return no candidates", async (context) => {
+  const answers = [
+    { items: [{ ...sharedMeterGap, status: "MISSING", relevantClauseIds: [], evidence: [] }] },
+    { items: [] },
+  ];
+  let calls = 0;
+  mockFetch(context, async () => { calls += 1; return claudeStream(answers.shift()); });
+  assert.equal((await discoverProtectionsWithClaude(protectionContext, []))[0]!.status, "MISSING");
+  assert.deepEqual(await discoverProtectionsWithClaude(protectionContext, []), []);
+  assert.deepEqual(await verifyProtectionsWithClaude(protectionContext, [], []), []);
+  assert.equal(calls, 2, "there is no paid verification call for an empty candidate set");
+});
+
+test("verification supports dismissal of an irrelevant candidate without adding a replacement topic", async (context) => {
+  mockFetch(context, async () => claudeStream({ items: [{ ...sharedMeterGap, status: "DISMISSED",
+    explanation: "המועמד אינו רלוונטי לעסקה הזו" }] }));
+  const report = await verifyProtectionsWithClaude(protectionContext, [sharedMeterGap], []);
+  assert.equal(report[0]!.status, "DISMISSED");
+  assert.equal(report[0]!.suggestedText, undefined);
+});
+
+for (const [name, patch] of [
+  ["an invented clause", { relevantClauseIds: ["C999"] }],
+  ["a fabricated quote in an existing clause", { evidence: [{ clauseId: "C101", quote: "טקסט שלא מופיע בחוזה" }] }],
+  ["an invented law reference", { legalReferenceIds: ["LAW-UNKNOWN"] }],
+  ["a legal claim without a supplied legal source", { basis: "LAW" }],
+  ["a preference claim without an explicit preference", { basis: "TENANT_PREFERENCE", preferenceKeys: [] }],
+  ["a false Required field treated as a tenant demand", { basis: "TENANT_PREFERENCE", preferenceKeys: ["petsRequired"] }],
+  ["an invented preference field", { basis: "TENANT_PREFERENCE", preferenceKeys: ["imaginaryPreference"] }],
+  ["partial coverage without evidence", { relevantClauseIds: [], evidence: [] }],
+  ["an actionable gap without a proposed addition", { suggestedText: undefined }],
+] as const) {
+  test(`protection validation drops ${name} and keeps the grounded items`, async (context) => {
+    const grounded = { ...sharedMeterGap, protectionId: "RR-GAP-GROUNDED-NEIGHBOUR" };
+    mockFetch(context, async () => claudeStream({ items: [{ ...sharedMeterGap, ...patch }, grounded] }));
+    const report = await discoverProtectionsWithClaude(protectionContext, [lawSection]);
+    assert.deepEqual(report.map((item) => item.protectionId), [grounded.protectionId]);
+  });
+}
+
+test("a supplied tenant requirement can ground a protection and is preserved through verification", async (context) => {
+  const preferenceGap = { ...sharedMeterGap, basis: "TENANT_PREFERENCE" as const, preferenceKeys: ["earlyExitRequired"] };
+  mockFetch(context, async () => claudeStream({ items: [preferenceGap] }));
+  const report = await verifyProtectionsWithClaude(protectionContext, [preferenceGap], []);
+  assert.deepEqual(report[0]!.preferenceKeys, ["earlyExitRequired"]);
+});
+
+test("discovery rejects duplicate IDs and verification rejects omitted or invented candidates", async (context) => {
+  const answers = [
+    { items: [sharedMeterGap, sharedMeterGap] },
+    { items: [] },
+    { items: [{ ...sharedMeterGap, protectionId: "RR-GAP-INVENTED-TOPIC" }] },
+  ];
+  mockFetch(context, async () => claudeStream(answers.shift()));
+  await assert.rejects(discoverProtectionsWithClaude(protectionContext, []), hasCode("INVALID_PROTECTION_RESPONSE"));
+  await assert.rejects(verifyProtectionsWithClaude(protectionContext, [sharedMeterGap], []), hasCode("INVALID_PROTECTION_RESPONSE"));
+  await assert.rejects(verifyProtectionsWithClaude(protectionContext, [sharedMeterGap], []), hasCode("INVALID_PROTECTION_RESPONSE"));
 });

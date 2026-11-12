@@ -48,11 +48,28 @@ for (const expectedCase of annotations.cases) {
   }
   const reportedProtections = new Set(
     (result.analysis.protectionReport ?? [])
-      .filter((item) => item.status !== "COVERED")
+      .filter((item) => item.status === "MISSING" || item.status === "PARTIAL")
       .map((item) => item.protectionId),
   );
+  // Contextual IDs are open-ended. A reviewer maps a discovered protection to a benchmark
+  // expectation; the runtime is never given that expectation or a catalog of allowed IDs.
+  const matchedExpectations = new Set();
+  if (result.analysis.protectionAnalysisMode === "CONTEXTUAL") {
+    for (const match of result.protectionMatches ?? []) {
+      if (!expectedCase.missingProtectionIds.includes(match.expectedProtectionId)
+        || !reportedProtections.has(match.reportedProtectionId)
+        || typeof match.reviewedBy !== "string" || !match.reviewedBy.trim()
+        || typeof match.rationale !== "string" || !match.rationale.trim()) {
+        failures.push(`${expectedCase.id} has an invalid or unreviewed protection match.`);
+        continue;
+      }
+      matchedExpectations.add(match.expectedProtectionId);
+    }
+  } else {
+    for (const id of reportedProtections) matchedExpectations.add(id);
+  }
   expectedProtections += expectedCase.missingProtectionIds.length;
-  foundProtections += expectedCase.missingProtectionIds.filter((id) => reportedProtections.has(id)).length;
+  foundProtections += expectedCase.missingProtectionIds.filter((id) => matchedExpectations.has(id)).length;
   for (const rawValue of expectedCase.privacy.rawValuesThatMustBeAbsent) {
     if (result.modelBoundText.includes(rawValue)) failures.push(`${expectedCase.id} leaked PII into modelBoundText.`);
   }

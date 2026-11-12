@@ -28,7 +28,7 @@
     "timingMs"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.5.0" },
+    "schemaVersion": { "const": "1.6.0" },
     "analysisId": { "type": "string", "minLength": 1 },
     "createdAt": { "type": "string", "format": "date-time" },
     "contractId": { "type": "string", "minLength": 1 },
@@ -68,6 +68,7 @@
     },
     "clauseLinking": { "type": "boolean" },
     "financialTerms": { "$ref": "#/$defs/financialTerms" },
+    "protectionAnalysisMode": { "enum": ["CONTEXTUAL", "FIXTURE", "UNAVAILABLE"] },
     "protectionReport": {
       "type": "array",
       "items": { "$ref": "#/$defs/protection" }
@@ -268,7 +269,7 @@
       "properties": {
         "protectionId": { "type": "string", "minLength": 1 },
         "title": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["COVERED", "MISSING", "PARTIAL"] },
+        "status": { "enum": ["COVERED", "MISSING", "PARTIAL", "UNKNOWN"] },
         "explanation": { "type": "string", "minLength": 1 },
         "relevantClauseIds": {
           "type": "array",
@@ -277,6 +278,20 @@
         "legalReferences": {
           "type": "array",
           "items": { "$ref": "#/$defs/legalReference" }
+        },
+        "basis": { "enum": ["LAW", "CONTRACT_RISK", "TENANT_PREFERENCE"] },
+        "confidence": { "enum": ["high", "medium", "low"] },
+        "applicability": { "type": "string" },
+        "scenario": { "type": "string" },
+        "preferenceKeys": { "type": "array", "items": { "type": "string" } },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["clauseId", "quote"],
+            "properties": { "clauseId": { "type": "string" }, "quote": { "type": "string" } }
+          }
         },
         "suggestedText": { "type": "string" }
       }

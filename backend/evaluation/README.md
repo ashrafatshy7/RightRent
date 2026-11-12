@@ -94,9 +94,25 @@ live run as `evaluation/results/<case-id>.json` with this shape:
 {
   "caseId": "RR-EVAL-001",
   "modelBoundText": "the exact locally redacted payload sent to the model",
-  "analysis": {}
+  "analysis": {},
+  "protectionMatches": [
+    {
+      "expectedProtectionId": "RR-REC-EARLY-TERMINATION",
+      "reportedProtectionId": "RR-GAP-TENANT-EXIT-RELEASE",
+      "reviewedBy": "Reviewer name",
+      "rationale": "The reported gap addresses the annotated tenant exit protection."
+    }
+  ]
 }
 ```
+
+Contextual discovery has no fixed protection IDs or topic catalog. For each live result, a human
+reviewer supplies `protectionMatches` linking actual `MISSING`/`PARTIAL` items to the case's
+annotated expectations, with a reviewer name and rationale. The gate rejects unknown reported IDs,
+unknown expectations, and unreviewed matches. `UNKNOWN` and `COVERED` never count as detected
+missing protections. Benchmark expectations remain evaluation data and are never model inputs.
+The offline CI checks assess extraction, privacy and clause rules; they do not claim to measure
+open-ended semantic discovery quality. New-topic discovery and completeness require reviewed live runs.
 
 Run `npm run evaluation:release`. It fails below the required dataset size, recall, precision,
 missing-protection recall, privacy, or timing thresholds. Never commit the `results` directory.

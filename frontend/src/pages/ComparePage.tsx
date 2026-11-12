@@ -43,6 +43,7 @@ const PROTECTION_LABELS: Record<ProtectionStatus, { label: string; tone: string 
   COVERED: { label: "קיימת", tone: "success" },
   PARTIAL: { label: "חלקית", tone: "warning" },
   MISSING: { label: "חסרה", tone: "danger" },
+  UNKNOWN: { label: "דרוש בירור", tone: "review" },
 };
 
 export function ComparePage() {
@@ -119,16 +120,16 @@ export function ComparePage() {
         </section>
 
         <aside className="compare-protections protection-panel">
-          <div className="section-heading"><div><span className="eyebrow">רשימת בדיקה</span><h2>הגנות בחוזה</h2></div></div>
-          {changedProtections.length ? null : <p className="compare-empty">ההגנות זהות בשתי הגרסאות.</p>}
+          <div className="section-heading"><div><span className="eyebrow">בדיקה לפי החוזה</span><h2>הגנות בחוזה</h2></div></div>
+          {changedProtections.length ? null : <p className="compare-empty">לא נמצאו הבדלים בהגנות שזוהו בשני הניתוחים.</p>}
           <ul>
             {comparison.protections.map((protection) => (
               <li key={protection.protectionId} className={protection.before !== protection.after ? "changed" : ""}>
                 <span>{protection.title}</span>
                 <div>
-                  {protection.before ? <StatusBadge tone={PROTECTION_LABELS[protection.before].tone}>{PROTECTION_LABELS[protection.before].label}</StatusBadge> : "אין"}
+                  {protection.before ? <StatusBadge tone={PROTECTION_LABELS[protection.before].tone}>{PROTECTION_LABELS[protection.before].label}</StatusBadge> : "לא זוהתה בניתוח"}
                   <ArrowLeft size={13} aria-label="השתנה ל" />
-                  {protection.after ? <StatusBadge tone={PROTECTION_LABELS[protection.after].tone}>{PROTECTION_LABELS[protection.after].label}</StatusBadge> : "אין"}
+                  {protection.after ? <StatusBadge tone={PROTECTION_LABELS[protection.after].tone}>{PROTECTION_LABELS[protection.after].label}</StatusBadge> : "לא זוהתה בניתוח"}
                 </div>
               </li>
             ))}

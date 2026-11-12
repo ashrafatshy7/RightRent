@@ -65,7 +65,7 @@ function protectionIssue(protection: Protection): NegotiationIssue {
     severity: "SUGGESTION",
     title: protection.title,
     summary: protection.explanation,
-    whyItMatters: null,
+    whyItMatters: protection.scenario ?? null,
     contractSection: null,
     clauseQuote: null,
     suggestedText: protection.suggestedText ?? null,
@@ -86,7 +86,7 @@ export function negotiationIssues(
 ): NegotiationIssue[] {
   const issues = [
     ...analysis.findings.filter((finding) => finding.severity !== "OK").map((finding) => findingIssue(finding, relevantPreferences)),
-    ...analysis.missingProtections.filter((item) => item.status !== "COVERED").map(protectionIssue),
+    ...analysis.missingProtections.filter((item) => item.status === "MISSING" || item.status === "PARTIAL").map(protectionIssue),
   ];
   return issues.sort((left, right) => SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]);
 }

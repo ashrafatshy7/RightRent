@@ -20,7 +20,8 @@ import type {
 import { getStore, type DataStore } from "../../shared/data/store.js";
 import { HttpError } from "../../shared/http/http-error.js";
 import {
-  analyzeProtectionsWithClaude,
+  discoverProtectionsWithClaude,
+  verifyProtectionsWithClaude,
   analyzeWithClaude,
   embedText,
   embedTexts,
@@ -29,6 +30,7 @@ import {
   PROTECTION_REQUEST_FINGERPRINT,
   VERDICT_REQUEST_FINGERPRINT,
   type ProviderVerdict,
+  type ProtectionAnalysisContext,
   type RelatedClauseContext,
 } from "./ai-providers.js";
 import { traceAnalysis, traceAnalysisFailure } from "./analysis-logger.js";
@@ -50,15 +52,11 @@ import { fixtureProtectionReport, fixtureVerdict, matchesFixtureContract } from 
 import { retrieveLawCorpus } from "./law-corpus.service.js";
 import { createMarkedPdf } from "./marked-pdf.service.js";
 import { MONITORED_LAW_SOURCES } from "../law/law-source.catalog.js";
-import {
-  evaluateProtectionChecklistDeterministically,
-  PROTECTION_CHECKLIST,
-} from "./protection-checklist.service.js";
 
 // The schema/logic version behind AnalysisResult and Finding, folded into analysisInputHash below
 // so that a change here always produces a fresh analysis instead of returning a previously saved
 // record in the old shape (see findAnalysisByInput).
-const ANALYSIS_SCHEMA_VERSION = "1.5.0";
+const ANALYSIS_SCHEMA_VERSION = "1.6.0";
 
 type RetrievedReference = {
   id: string;
@@ -102,6 +100,10 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item
 }
 
 const REFERENCE_EXCERPT_MAX_CHARS = 320;
+// The embedding model takes at most 8,192 tokens per input, and contract JSON in Hebrew runs close
+// to one token per character (0.88 measured on a filled-in five-page lease), so 12,000 characters
+// overflowed it.
+const PROTECTION_QUERY_MAX_CHARS = 7_000;
 
 function legalReference(reference: RetrievedReference): LegalReference {
   return {
@@ -352,47 +354,75 @@ function computeHeadline(summary: { critical: number; warnings: number; complian
 
 async function protectionReport(
   clauses: ContractClause[],
+  graph: ClauseGraph,
   store: DataStore,
   scope: AiResultScope,
   useFixture: boolean,
-): Promise<{ protections: Protection[]; reused: boolean }> {
+): Promise<{ protections: Protection[]; reused: boolean; mode: "CONTEXTUAL" | "FIXTURE" | "UNAVAILABLE" }> {
   if (env.analysisProvider !== "anthropic") {
-    if (useFixture) return { protections: fixtureProtectionReport(), reused: true };
-    return { protections: evaluateProtectionChecklistDeterministically(clauses), reused: false };
+    if (useFixture) return { protections: fixtureProtectionReport(), reused: true, mode: "FIXTURE" };
+    // Offline rules cannot discover arbitrary omissions. Do not turn an unavailable check into
+    // a reassuring fixed checklist or a claim that every protection is present.
+    return { protections: [], reused: false, mode: "UNAVAILABLE" };
   }
-  const key = sha256({
-    kind: "protection-report",
+  const context: ProtectionAnalysisContext = {
+    clauses,
+    preferences: scope.preferences,
+    facts: Object.values(graph.contractFacts),
+    relations: [...graph.links].flatMap(([clauseId, links]) =>
+      links.map((link) => ({ clauseId, relatedClauseId: link.clauseId, relation: link.relation }))),
+  };
+  const contextKey = {
     request: PROTECTION_REQUEST_FINGERPRINT,
     userId: scope.userId,
     lawCorpus: scope.lawCorpus,
-    clauses: clauses.map(({ id, text }) => ({ id, text })),
-  });
-  const { value, reused } = await reuseOrCompute(store, key, async () => {
-    const checklistQuery = PROTECTION_CHECKLIST
-      .map((item) => `${item.title}: ${item.description}`)
-      .join("\n");
-    const lawSections = await retrieveLawCorpus(await embedText(checklistQuery), 5);
-    const providerReport = await analyzeProtectionsWithClaude(clauses, PROTECTION_CHECKLIST, lawSections);
-    const context = lawSections.map(chunkReference);
-    return providerReport.map<Protection>((item) => {
-      const checklistItem = PROTECTION_CHECKLIST.find((candidate) => candidate.protectionId === item.protectionId)!;
-      return {
+    context,
+  };
+  const { value, reused } = await reuseOrCompute(store, sha256({ kind: "contextual-protection-report", ...contextKey }), async () => {
+    // The broad query lets discovery see protections even when their subject is wholly absent
+    // from the contract. A second query reflects this transaction rather than a topic checklist.
+    const queries = [
+      "הגנות לשוכר בחוזה שכירות למגורים, תחולת הוראות החוק, זכויות וחובות הצדדים והסדרים החלים גם ללא סעיף מפורש בחוזה",
+      JSON.stringify({ facts: context.facts, preferences: context.preferences,
+        contract: clauses.map(({ text }) => text).join("\n") }).slice(0, PROTECTION_QUERY_MAX_CHARS),
+    ];
+    const vectors = await embedTexts(queries);
+    const initialLaw = (await Promise.all(vectors.map((vector) => retrieveLawCorpus(vector, 5)))).flat();
+    const uniqueLaw = (sections: LawChunk[]) => [...new Map(sections.map((section) => [section.id, section])).values()];
+    const discoveryLaw = uniqueLaw(initialLaw);
+    const discovery = await reuseOrCompute(store, sha256({ kind: "protection-discovery", ...contextKey,
+      law: discoveryLaw.map(({ id, contentHash }) => ({ id, contentHash })) }),
+    () => discoverProtectionsWithClaude(context, discoveryLaw));
+    if (!discovery.value.length) return [];
+
+    // Retrieve specifically for the newly discovered gaps, including topics that never appeared
+    // in the original eight recommendations. Embeddings are batched, retrieval concurrency bounded.
+    const gapVectors = await embedTexts(discovery.value.map((item) => `${item.title}\n${item.applicability}\n${item.scenario}`));
+    const additionalLaw = (await mapWithConcurrency(gapVectors, 3, (vector) => retrieveLawCorpus(vector, 3))).flat();
+    const verificationLaw = uniqueLaw([...discoveryLaw, ...additionalLaw]);
+    const verification = await reuseOrCompute(store, sha256({ kind: "protection-verification", ...contextKey,
+      candidates: discovery.value, law: verificationLaw.map(({ id, contentHash }) => ({ id, contentHash })) }),
+    () => verifyProtectionsWithClaude(context, discovery.value, verificationLaw));
+    const references = verificationLaw.map(chunkReference);
+    return verification.value
+      .filter((item) => item.status !== "DISMISSED")
+      .map<Protection>((item) => ({
         protectionId: item.protectionId,
-        title: checklistItem.title,
-        status: item.status,
+        title: item.title,
+        status: item.status as Protection["status"],
+        basis: item.basis,
+        confidence: item.confidence,
+        applicability: item.applicability,
+        scenario: item.scenario,
         explanation: item.explanation,
         relevantClauseIds: item.relevantClauseIds,
-        legalReferences: item.legalReferenceIds
-          .map((id) => context.find((reference) => reference.id === id))
-          .filter((reference): reference is RetrievedReference => Boolean(reference))
-          .map(legalReference),
-        ...(item.status === "COVERED" ? {} : {
-          suggestedText: item.suggestedText ?? checklistItem.suggestedText,
-        }),
-      };
-    });
+        evidence: item.evidence,
+        preferenceKeys: item.preferenceKeys,
+        legalReferences: item.legalReferenceIds.map((id) => legalReference(references.find((reference) => reference.id === id)!)),
+        ...(item.status === "MISSING" || item.status === "PARTIAL" ? { suggestedText: item.suggestedText! } : {}),
+      }));
   });
-  return { protections: value, reused };
+  return { protections: value, reused, mode: "CONTEXTUAL" };
 }
 
 // The money terms for the cost simulator: the local rules always, and with the Anthropic provider a
@@ -451,6 +481,7 @@ function analysisInputHash(
     preferences,
     provider: env.analysisProvider,
     clauseLinking: env.clauseLinking,
+    protectionRequest: PROTECTION_REQUEST_FINGERPRINT,
     lawCorpus,
   });
 }
@@ -515,13 +546,21 @@ export async function analyzeContract(
     const started = performance.now();
     traceAnalysis("Removing personal details locally before any cloud request...");
     const redactionStarted = performance.now();
-    const redaction = await redactClauses(contract.clauses);
+    const notes = preferences.additionalNotes.trim();
+    const redaction = await redactClauses(notes
+      ? [...contract.clauses, { id: "TENANT_NOTES", text: notes, locations: [] }]
+      : contract.clauses);
+    // Free-text preferences are redacted locally as well as the contract before cloud requests.
+    const modelPreferences = notes
+      ? { ...preferences, additionalNotes: redaction.clauses.pop()!.text }
+      : preferences;
+    scope.preferences = modelPreferences;
     const redactionMs = Math.round(performance.now() - redactionStarted);
     traceAnalysis(`Redaction done in ${redactionMs} ms: ${redaction.redactedEntityCount} details removed (${redaction.mode}${redaction.model ? `, ${redaction.model}` : ""}).`);
 
     // Headers, page numbers, and other non-substantive clauses (e.g. the document's own title line,
     // which the extractor turns into its own clause) never get a finding of their own - the
-    // protection checklist still sees every clause, since a protection could in principle be stated
+    // protection discovery still sees every clause, since a protection could in principle be stated
     // anywhere, but generating a per-clause verdict for junk content only adds cost and noise
     // (section 16 of the brief).
     const analyzableClauses = redaction.clauses.filter(isSubstantiveClause);
@@ -540,10 +579,10 @@ export async function analyzeContract(
       ? `Linked related clauses: ${linkCount} links across ${analyzableClauses.length} clauses (${embeddings ? "embeddings" : "lexical"} similarity).`
       : "Clause linking is off (CLAUSE_LINKING=off); each clause is analyzed alone.");
 
-    // The protection checklist reads only the redacted clauses, so it runs alongside clause analysis.
-    stage = "clause analysis and protection checklist";
+    // Contextual protection discovery and verification read the full redacted contract alongside clause analysis.
+    stage = "clause analysis and contextual protections";
     const clauseCount = analyzableClauses.length;
-    traceAnalysis(`Analyzing ${clauseCount} clauses (3 at a time) and checking ${PROTECTION_CHECKLIST.length} recommended protections in parallel...`);
+    traceAnalysis(`Analyzing ${clauseCount} clauses (3 at a time) and discovering context-specific protection gaps in parallel...`);
     const analysisStarted = performance.now();
     let completedClauses = 0;
     const verdictsPromise = mapWithConcurrency(analyzableClauses, 3, async (clause) => {
@@ -570,19 +609,20 @@ export async function analyzeContract(
     });
     const protectionsPromise = (async () => {
       const protectionsStarted = performance.now();
-      const { protections, reused } = await protectionReport(redaction.clauses, store, scope, useFixture);
+      const { protections, reused, mode } = await protectionReport(redaction.clauses, graph, store, scope, useFixture);
       for (const protection of protections) {
         traceAnalysis(`  ${protection.protectionId} -> ${protection.status}${protection.relevantClauseIds.length ? ` (clauses ${protection.relevantClauseIds.join(", ")})` : ""}`);
       }
       const countStatus = (status: Protection["status"]) => protections.filter((item) => item.status === status).length;
       traceAnalysis(
-        `Protection checklist done in ${Math.round(performance.now() - protectionsStarted)} ms${reused ? " (reused from an earlier attempt, no new tokens)" : ""}:`
-          + ` ${countStatus("COVERED")} covered, ${countStatus("PARTIAL")} partial, ${countStatus("MISSING")} missing.`,
+        `Contextual protections (${mode}) done in ${Math.round(performance.now() - protectionsStarted)} ms${reused ? " (reused from an earlier attempt, no new tokens)" : ""}:`
+          + ` ${countStatus("COVERED")} covered, ${countStatus("PARTIAL")} partial, ${countStatus("MISSING")} missing, ${countStatus("UNKNOWN")} unknown.`,
       );
-      return protections;
+      return { protections, mode };
     })();
     const financialPromise = financialTerms(redaction.clauses, graph, store, scope);
-    const [verdicts, protections, financial] = await Promise.all([verdictsPromise, protectionsPromise, financialPromise]);
+    const [verdicts, protectionResult, financial] = await Promise.all([verdictsPromise, protectionsPromise, financialPromise]);
+    const { protections, mode: protectionAnalysisMode } = protectionResult;
     const findings = withRelatedFindingIds(
       reconcileBlankFieldFindings(
         analyzableClauses.map((clause, index) =>
@@ -591,7 +631,7 @@ export async function analyzeContract(
         financial,
       ).sort(byPriority),
     );
-    const incompleteProtections = protections.filter((item) => item.status !== "COVERED");
+    const incompleteProtections = protections.filter((item) => item.status === "MISSING" || item.status === "PARTIAL");
     const analysisMs = Math.round(performance.now() - analysisStarted);
 
     stage = "marked PDF generation";
@@ -627,6 +667,7 @@ export async function analyzeContract(
       crossClauseIssues: mergeCrossClauseIssues(findings, analyzableClauses.map((clause) => clause.id)),
       clauseLinking: env.clauseLinking,
       protectionReport: protections,
+      protectionAnalysisMode,
       financialTerms: financial,
       missingProtections: incompleteProtections,
       suggestedAdditions: incompleteProtections,

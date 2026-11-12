@@ -260,6 +260,9 @@ test("analysis returns deterministic legal findings and a marked PDF", async () 
   assert.equal(body.analysis.status, "COMPLETED");
   assert.equal(body.analysis.summary.critical, 1);
   assert.equal(validateAnalysis(body.analysis), true, JSON.stringify(validateAnalysis.errors));
+  assert.equal(body.analysis.protectionAnalysisMode, "UNAVAILABLE");
+  assert.deepEqual(body.analysis.protectionReport, []);
+  assert.deepEqual(body.analysis.missingProtections, []);
   assert.equal(body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002").severity, "RED");
   assert.equal(body.analysis.findings.find((item: { clauseId: string }) => item.clauseId === "C002").legalReferences[0].lawReferenceId, "IL-RLL-25Y-SECURITY-CAP");
   // The guarantee was judged together with the clause that defines the rent and term it is capped by.

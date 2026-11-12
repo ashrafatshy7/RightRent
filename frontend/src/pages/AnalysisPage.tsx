@@ -26,13 +26,14 @@ import { CostSimulator } from "../components/CostSimulator";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { LoadingState } from "../components/LoadingState";
 import { PageHeader } from "../components/PageHeader";
+import { ProtectionPanel } from "../components/ProtectionPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import { ROUTES } from "../config/app";
 import { api, messageForError } from "../lib/api-client";
 import { clauseLabel, formatCurrency, formatDate, formatNumber } from "../lib/format";
 import { useMediaQuery } from "../lib/use-media-query";
 import { previousVersionAnalysis } from "../lib/versions";
-import type { Analysis, CrossClauseIssueKind, DeterministicCheck, Finding, FindingCategory, Protection, Severity } from "../types/api";
+import type { Analysis, CrossClauseIssueKind, DeterministicCheck, Finding, FindingCategory, Severity } from "../types/api";
 import type { FocusRequest, ViewerHighlight } from "../components/ContractViewer";
 
 // pdf.js is large; it loads only when an analysis is actually opened.
@@ -305,7 +306,7 @@ export function AnalysisPage() {
             <button type="button" className="verdict-count count-warning" onClick={() => showFindings("ORANGE")}><strong>{analysis.summary.warnings}</strong><span>כדאי לבדוק</span></button>
             <button type="button" className="verdict-count count-success" onClick={() => showFindings("OK")}><strong>{analysis.summary.compliant}</strong><span>תקינים</span></button>
             {analysis.protectionReport.length ? (
-              <button type="button" className="verdict-count count-protections" onClick={() => showTab("protections")}><strong>{incompleteProtections}</strong><span>הגנות חסרות או חלקיות</span></button>
+              <button type="button" className="verdict-count count-protections" onClick={() => showTab("protections")}><strong>{incompleteProtections}</strong><span>הגנות להשלמה או לבירור</span></button>
             ) : null}
           </div>
         </div>
@@ -427,40 +428,6 @@ export function AnalysisPage() {
       </Link>
       <div className="legal-disclaimer"><ShieldCheck size={18} /><span>הבדיקה עוזרת לכם להחליט, אבל היא לא ייעוץ משפטי. אם יש סעיף שדורש טיפול, כדאי להתייעץ עם עורך דין.</span></div>
     </div>
-  );
-}
-
-const PROTECTION_ORDER: Record<Protection["status"], number> = { MISSING: 0, PARTIAL: 1, COVERED: 2 };
-
-function ProtectionPanel({ analysis, findingsByClauseId, onOpenFinding }: { analysis: Analysis; findingsByClauseId: Map<string, Finding>; onOpenFinding: (clauseId: string) => void }) {
-  const protections = analysis.protectionReport.toSorted((left, right) => PROTECTION_ORDER[left.status] - PROTECTION_ORDER[right.status]);
-  const allCovered = protections.every((protection) => protection.status === "COVERED");
-  return (
-    <>
-      <div className="section-heading"><div><span className="eyebrow">רשימת בדיקה</span><h2>{allCovered ? "כל ההגנות החשובות קיימות בחוזה" : "הגנות חשובות בחוזה"}</h2></div><FileCheck2 size={24} /></div>
-      <div className="protection-progress"><span style={{ width: `${coveragePercent(analysis)}%` }} /><small>{coveragePercent(analysis)}% מההגנות קיימות בחוזה</small></div>
-      <div className="protection-list">
-        {protections.map((protection) => {
-          const linkedFindings = protection.relevantClauseIds
-            .map((clauseId) => findingsByClauseId.get(clauseId))
-            .filter((finding): finding is Finding => Boolean(finding));
-          return (
-            <article key={protection.protectionId} className={`protection-item protection-${protection.status.toLowerCase()}`}>
-              <div><strong>{protection.title}</strong><StatusBadge tone={protection.status === "COVERED" ? "success" : protection.status === "PARTIAL" ? "warning" : "danger"}>{protection.status === "COVERED" ? "קיימת" : protection.status === "PARTIAL" ? "חלקית" : "חסרה"}</StatusBadge></div>
-              <p>{protection.explanation}</p>
-              {linkedFindings.length ? (
-                <p className="protection-cross-link">
-                  קשור לממצא: {linkedFindings.map((finding, index) => (
-                    <span key={finding.clauseId}>{index > 0 ? ", " : ""}<button type="button" className="text-link-button" onClick={() => onOpenFinding(finding.clauseId)}>{finding.title}</button></span>
-                  ))}
-                </p>
-              ) : null}
-              {protection.suggestedText ? <details><summary>נוסח שאפשר לבקש להוסיף</summary><blockquote>{protection.suggestedText}</blockquote></details> : null}
-            </article>
-          );
-        })}
-      </div>
-    </>
   );
 }
 
@@ -608,9 +575,3 @@ function FindingCard({ finding, findingsByClauseId, selected, onShowInContract, 
 }
 
 function ScaleReference() { return <span aria-hidden="true">§</span>; }
-
-function coveragePercent(analysis: Analysis) {
-  if (!analysis.protectionReport.length) return 100;
-  const score = analysis.protectionReport.reduce((total, protection) => total + (protection.status === "COVERED" ? 1 : protection.status === "PARTIAL" ? 0.5 : 0), 0);
-  return Math.round(score / analysis.protectionReport.length * 100);
-}

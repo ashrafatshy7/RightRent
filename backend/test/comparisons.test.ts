@@ -6,7 +6,6 @@ import { defaultPreferences, type AnalysisRecord, type ContractClause, type Cont
 import { classifyClause, isSubstantiveClause } from "../src/modules/analyses/classification.js";
 import { linkClauses } from "../src/modules/analyses/clause-linking.service.js";
 import { computeDeterministicChecks, deterministicVerdict } from "../src/modules/analyses/deterministic-analysis.service.js";
-import { evaluateProtectionChecklistDeterministically } from "../src/modules/analyses/protection-checklist.service.js";
 import { alignClauses, assign, numberChanges, wordDiff } from "../src/modules/comparisons/clause-alignment.service.js";
 import { compareVersions } from "../src/modules/comparisons/comparison.service.js";
 import { extractClausesFromPlainText } from "../src/modules/contracts/pdf-extraction.service.js";
@@ -58,9 +57,10 @@ function analysis(id: string, contractRecord: ContractRecord): AnalysisRecord {
   return {
     analysisId: id,
     contractId: contractRecord.id,
-    schemaVersion: "1.5.0",
+    schemaVersion: "1.6.0",
     findings,
-    protectionReport: evaluateProtectionChecklistDeterministically(contractRecord.clauses),
+    protectionReport: [],
+    protectionAnalysisMode: "UNAVAILABLE",
     preferencesSnapshot: preferences,
     summary: { critical: 0, warnings: 0, compliant: 0 },
     createdAt: "2026-10-11T00:00:00.000Z",
@@ -138,5 +138,21 @@ test("each change is classified from the tenant's side", () => {
   // Most important first: new problems, then unrequested changes, then what remains, then fixes.
   assert.deepEqual([...new Set(comparison.items.map((item) => item.status))], ["NEW_ISSUE", "UNREQUESTED_CHANGE", "STILL_OPEN", "FIXED", "UNCHANGED"]);
   assert.match(comparison.headline, /1 מתוך 3/u);
-  assert.deepEqual(comparison.warnings, []);
+  assert.equal(comparison.warnings.length, 1);
+  assert.match(comparison.warnings[0]!, /השוואת ההגנות אינה מלאה/u);
+});
+
+test("a contextual protection absent from another run is unassessed rather than declared fixed", () => {
+  const beforeContract = contract("v1", version1, 1);
+  const afterContract = contract("v2", version2, 2);
+  const before = analysis("a1", beforeContract);
+  const after = analysis("a2", afterContract);
+  before.protectionAnalysisMode = "CONTEXTUAL";
+  after.protectionAnalysisMode = "CONTEXTUAL";
+  before.protectionReport = [{ protectionId: "RR-GAP-SHARED-METER-ALLOCATION", title: "חלוקת חשבון", status: "MISSING",
+    explanation: "לא נקבעה חלוקה", relevantClauseIds: [], legalReferences: [] }];
+  const comparison = compareVersions(beforeContract, before, afterContract, after);
+  assert.equal(comparison.protections[0]!.before, "MISSING");
+  assert.equal(comparison.protections[0]!.after, null);
+  assert.ok(comparison.warnings.some((warning) => warning.includes("אינו בהכרח")));
 });

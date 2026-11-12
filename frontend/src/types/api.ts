@@ -47,7 +47,7 @@ export type UploadedContract = {
 };
 
 export type Severity = "RED" | "ORANGE" | "OK";
-export type ProtectionStatus = "COVERED" | "PARTIAL" | "MISSING";
+export type ProtectionStatus = "COVERED" | "PARTIAL" | "MISSING" | "UNKNOWN";
 
 // Internal reason bucket behind a severity - RED/ORANGE/OK stay the only tenant-facing labels.
 export type FindingCategory = "legal_compliance" | "contractual_risk" | "tenant_preference" | "informational";
@@ -141,6 +141,13 @@ export type Protection = {
   relevantClauseIds: string[];
   legalReferences: LegalReference[];
   suggestedText?: string;
+  // Absent on historical analyses and fixture captures.
+  basis?: "LAW" | "CONTRACT_RISK" | "TENANT_PREFERENCE";
+  confidence?: ConfidenceLevel;
+  applicability?: string;
+  scenario?: string;
+  evidence?: Array<{ clauseId: string; quote: string }>;
+  preferenceKeys?: string[];
 };
 
 export type TermSource = { clauseId: string; quote: string; verified: boolean; origin: "RULE" | "MODEL"; conflict?: boolean };
@@ -262,6 +269,7 @@ export type Analysis = {
   crossClauseIssues?: Array<CrossClauseIssue & { severity: Severity }>;
   clauseLinking?: boolean;
   protectionReport: Protection[];
+  protectionAnalysisMode?: "CONTEXTUAL" | "FIXTURE" | "UNAVAILABLE";
   // Absent on analyses saved before the cost simulator.
   financialTerms?: FinancialTerms;
   financialOverrides?: FinancialOverrides;

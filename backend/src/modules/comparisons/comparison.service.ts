@@ -165,6 +165,12 @@ export function compareVersions(
   });
 
   const warnings: string[] = [];
+  if (base.protectionAnalysisMode === "CONTEXTUAL" || target.protectionAnalysisMode === "CONTEXTUAL") {
+    warnings.push("ההגנות מזוהות לפי ההקשר בכל ניתוח. נושא שלא זוהה באחת הגרסאות אינו בהכרח הגנה שנוספה או בעיה שנפתרה; יש לבדוק את הנוסח.");
+  }
+  if (base.protectionAnalysisMode === "UNAVAILABLE" || target.protectionAnalysisMode === "UNAVAILABLE") {
+    warnings.push("בדיקת הגנות חסרות לא הייתה זמינה לפחות באחד הניתוחים, ולכן השוואת ההגנות אינה מלאה.");
+  }
   if (JSON.stringify(base.preferencesSnapshot) !== JSON.stringify(target.preferencesSnapshot)) {
     warnings.push("שתי הגרסאות נותחו עם העדפות שונות, ולכן חלק מההבדלים בממצאים נובעים מההעדפות ולא מהחוזה.");
   }

@@ -7,9 +7,6 @@ import {
   redactWithDictaBert,
 } from "../src/modules/analyses/anonymization.service.js";
 import {
-  evaluateProtectionChecklistDeterministically,
-} from "../src/modules/analyses/protection-checklist.service.js";
-import {
   extractClausesFromPlainText,
   extractPdf,
   locatedLinesFromOcrBlocks,
@@ -90,19 +87,6 @@ test("OCR word boxes are mapped from rendered top-left coordinates to PDF bottom
   assert.equal(lines[0]!.text, "שלום עולם");
   assert.deepEqual(lines[0]!.locations[0], { page: 2, bbox: [50, 722, 40, 20] });
   assert.deepEqual(lines[0]!.locations[1], { page: 2, bbox: [95, 722, 45, 20] });
-});
-
-test("the contract-level checklist reports covered, partial, and missing protections", () => {
-  const clauses = extractClausesFromPlainText([
-    "[C001]",
-    "השוכר רשאי להציע שוכר חלופי והמשכיר לא יסרב מטעמים בלתי סבירים.",
-    "[C002]",
-    "החוזה מזכיר כניסת המשכיר לדירה אך אינו קובע הודעה מראש.",
-  ].join("\n"));
-  const report = evaluateProtectionChecklistDeterministically(clauses);
-  assert.equal(report.find((item) => item.protectionId === "RR-REC-EARLY-TERMINATION")?.status, "COVERED");
-  assert.equal(report.find((item) => item.protectionId === "RR-REC-ENTRY-NOTICE")?.status, "PARTIAL");
-  assert.equal(report.find((item) => item.protectionId === "RR-REC-WEAR-AND-TEAR")?.status, "MISSING");
 });
 
 test("per-glyph PDF items are joined into words by geometry, not by item boundaries", () => {

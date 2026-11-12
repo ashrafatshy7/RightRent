@@ -238,11 +238,18 @@ export type Finding = {
 export type Protection = {
   protectionId: string;
   title: string;
-  status: "COVERED" | "PARTIAL" | "MISSING";
+  status: "COVERED" | "PARTIAL" | "MISSING" | "UNKNOWN";
   explanation: string;
   relevantClauseIds: string[];
   legalReferences: LegalReference[];
   suggestedText?: string;
+  // Absent on historical analyses and fixture captures.
+  basis?: "LAW" | "CONTRACT_RISK" | "TENANT_PREFERENCE";
+  confidence?: ConfidenceLevel;
+  applicability?: string;
+  scenario?: string;
+  evidence?: Array<{ clauseId: string; quote: string }>;
+  preferenceKeys?: string[];
 };
 
 // Where a financial term was read from. A value is "verified" when its quote is verbatim contract
@@ -323,7 +330,7 @@ export type FinancialOverrides = {
 };
 
 export type AnalysisResult = {
-  schemaVersion: "1.5.0";
+  schemaVersion: "1.6.0";
   analysisId: string;
   contractId: string;
   status: "COMPLETED";
@@ -339,6 +346,7 @@ export type AnalysisResult = {
   // Whether related clauses were supplied as context (CLAUSE_LINKING), recorded for evaluation runs.
   clauseLinking: boolean;
   protectionReport: Protection[];
+  protectionAnalysisMode?: "CONTEXTUAL" | "FIXTURE" | "UNAVAILABLE";
   financialTerms: FinancialTerms;
   missingProtections: Protection[];
   suggestedAdditions: Protection[];

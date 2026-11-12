@@ -27,10 +27,6 @@ import {
   computeDeterministicChecks,
   deterministicVerdict,
 } from "../src/modules/analyses/deterministic-analysis.service.js";
-import {
-  detectMissingProtections,
-  evaluateProtectionChecklistDeterministically,
-} from "../src/modules/analyses/protection-checklist.service.js";
 import { extractClausesFromPlainText } from "../src/modules/contracts/pdf-extraction.service.js";
 
 type EvaluationCase = {
@@ -120,8 +116,8 @@ for (const evaluationCase of annotations.cases) {
       assert.equal(link, undefined, `${unexpected.from} must not be supplied with ${unexpected.to}`);
     }
 
-    const missing = detectMissingProtections(redaction.clauses).map((item) => item.protectionId);
-    for (const expected of evaluationCase.missingProtectionIds) assert.ok(missing.includes(expected));
+    // Open-ended protection discovery is verified in provider tests and reviewed live evaluations;
+    // deterministic clause rules cannot establish recall for arbitrary missing protections.
   });
 }
 
@@ -276,18 +272,6 @@ test("clause linking can be switched off for evaluation runs, keeping the contra
   assert.deepEqual(graph.links.get("C002"), []);
   assert.equal(graph.contractFacts.MONTHLY_RENT?.value, 6_000);
   assert.equal(linkClauses(clauses).links.get("C002")![0]?.clauseId, "C001");
-});
-
-test("a landlord-only early-termination right is PARTIAL, not COVERED, for the tenant protection checklist", () => {
-  const clause = {
-    id: "C012",
-    text: "המשכיר רשאי לבטל את החוזה בכל עת בהודעה מוקדמת של 30 יום, מבלי שלשוכר תהיה זכות מקבילה לביטול מוקדם של החוזה.",
-    locations: [],
-  };
-  const protections = evaluateProtectionChecklistDeterministically([clause]);
-  const earlyTermination = protections.find((item) => item.protectionId === "RR-REC-EARLY-TERMINATION");
-  assert.ok(earlyTermination);
-  assert.equal(earlyTermination.status, "PARTIAL");
 });
 
 test("preferences saved before a field existed are read with its default, in one key order", () => {

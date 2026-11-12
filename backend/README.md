@@ -167,8 +167,8 @@ attribution/share-alike terms.
 
 `ANALYSIS_PROVIDER=deterministic` is a local and CI fixture mode and is rejected in production. It implements the documented
 two-track assessment for the executable fixtures, applies the statutory security cap and repair
-rule, evaluates tenant preference conflicts, detects missing protections, and never needs cloud
-credentials.
+rule, evaluates tenant preference conflicts, and never needs cloud credentials. Open-ended missing-
+protection analysis is explicitly `UNAVAILABLE` in this mode; it does not use a fixed checklist.
 
 `ANALYSIS_PROVIDER=anthropic` is the RAG mode from the Project Book. Each already-redacted clause
 is embedded with OpenAI, the five closest verified law vectors are retrieved from Atlas Vector
@@ -178,10 +178,22 @@ applies the deterministic rule `violation -> RED`, `risk/preference conflict -> 
 `OK`. A claimed violation without a retrieved legal reference is rejected instead of being shown
 to the tenant.
 
-In parallel with clause analysis, a separate contract-level Claude request evaluates every
-predefined protection as `COVERED`, `PARTIAL`, or `MISSING`, maps it to clause IDs, and suggests
-text for incomplete protections. RAG analysis is disabled unless all 13 monitored laws have
-approved `ACTIVE` versions.
+In parallel with clause analysis, Claude discovers protection gaps from the complete redacted
+contract, tenant preferences, extracted facts, related clauses, and verified law context. There is
+no predefined list of protections or required finding count. Each candidate explains its specific
+relevance and a plausible tenant scenario. Candidate-specific law retrieval then feeds a separate
+verification call that searches the whole contract for counterevidence, equivalent provisions,
+overrides, and legal protections that already apply without an express clause. Irrelevant candidates
+are discarded; resolved ones remain `COVERED`, actionable gaps are `PARTIAL` or `MISSING`, and
+unavailable annexes or insufficient context are `UNKNOWN`. Only actionable gaps produce additions
+or negotiation issues. Exact quotes, clause/law IDs, and preference keys are validated in code;
+semantic relevance and completeness remain model judgments and need reviewed live evaluations.
+Both paid stages are cached separately, including preferences, context, prompt/schema/validation,
+and law versions. Free-text preferences are locally redacted before cloud requests. The UI does not
+turn a variable set of candidates into a percentage of all possible protections. A semantic ID is
+not guaranteed to recur between independent runs, so comparisons explicitly mark absent findings
+as unassessed rather than fixed. Historical fixture captures remain available only for the exact
+fixture contract. RAG analysis is disabled unless all 13 monitored laws have approved `ACTIVE` versions.
 
 Claude calls use `ANTHROPIC_MODEL` (default `claude-sonnet-5`) with adaptive thinking and a
 per-call effort level, and always stream: a call fails only when its stream stays silent for 60
